@@ -259,6 +259,10 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 #tab-options .tab-opt.in-group { padding-left: 16px; }
 #tab-options .tab-opt.hl { background: var(--menu-hover); }
 #tab-options .tab-opt[aria-selected=true] { color: var(--accent); font-weight: 600; }
+.tab-icon { flex: none; display: inline-flex; width: 16px; height: 16px; }
+.tab-icon img { width: 16px; height: 16px; object-fit: contain; }
+.tab-icon.blank { color: var(--muted); }
+.tab-closed .tab-icon { opacity: 0.5; filter: grayscale(1); }
 .tab-opt .tab-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab-opt .tab-count { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; font-weight: normal; }
 .tab-closed .tab-title, .select-btn.tab-closed .select-label { text-decoration: line-through; color: var(--muted); }

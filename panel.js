@@ -947,6 +947,27 @@ async function refreshTabs() {
 
 const tabTitleOf = (t, id) => (t && (t.title || t.url)) || `Tab #${id}`;
 
+/* A tab's icon. Chrome: from its favicon cache (the _favicon endpoint, no
+ * network). Firefox: the icon URL the tab reported, which the page has just
+ * loaded, so it normally comes from cache. Anything else (no icon, internal
+ * pages, a load error) shows a plain page icon. */
+const BLANK_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 1.5h5.5L13 5v9.5H4z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M9.5 1.5V5H13" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>';
+function tabIconSrc(t) {
+  if (!t) return null;
+  if (IS_CHROME) return /^https?:/.test(t.url || "") ? `${browser.runtime.getURL("/_favicon/")}?pageUrl=${encodeURIComponent(t.url)}&size=32` : null;
+  return /^(https?|data):/.test(t.favIconUrl || "") ? t.favIconUrl : null;
+}
+function tabIcon(t) {
+  const box = h("span", { class: "tab-icon" });
+  const src = tabIconSrc(t);
+  const blank = () => { box.innerHTML = BLANK_ICON; box.classList.add("blank"); };
+  if (!src) { blank(); return box; }
+  const img = h("img", { src, alt: "", width: "16", height: "16", decoding: "async", referrerpolicy: "no-referrer" });
+  img.addEventListener("error", blank, { once: true });
+  box.append(img);
+  return box;
+}
+
 // The options, in order: { group } headers and { value, title, closed, count, inGroup } rows.
 function tabItems() {
   const counts = new Map();
@@ -955,7 +976,7 @@ function tabItems() {
   const origin = state.originTabId;
   const ot = origin != null ? tabTitles.get(origin) : null;
   items.push({ value: "current", title: origin != null ? `Current tab: ${tabTitleOf(ot, origin)}` : "Current tab",
-    closed: false, count: origin != null ? counts.get(origin) || 0 : null });
+    closed: false, count: origin != null ? counts.get(origin) || 0 : null, tab: ot || null, icon: origin != null });
   items.push({ value: "all", title: "All tabs", count: store.size });
 
   const byWindow = new Map(); // windowId -> tabs shown
@@ -977,7 +998,7 @@ function tabItems() {
     items.push({ group: label, note });
     for (const id of ids) {
       const t = tabTitles.get(id);
-      items.push({ value: String(id), title: tabTitleOf(t, id), url: t ? t.url : "", closed: !t || t.closed, count: counts.get(id) || 0, inGroup: true });
+      items.push({ value: String(id), title: tabTitleOf(t, id), url: t ? t.url : "", closed: !t || t.closed, count: counts.get(id) || 0, inGroup: true, tab: t || null, icon: true });
     }
   };
 
@@ -1008,6 +1029,9 @@ function updateTabButton() {
   const item = tabItems().find((it) => it.value === state.tabFilter);
   const label = tabSelect.querySelector(".select-label");
   label.textContent = item ? item.title : "Current tab";
+  const oldIcon = tabSelect.querySelector(".tab-icon");
+  if (oldIcon) oldIcon.remove();
+  if (item && item.icon) tabSelect.prepend(tabIcon(item.tab));
   tabSelect.classList.toggle("tab-closed", !!(item && item.closed && item.inGroup));
   tabSelect.title = (item ? item.title + (item.closed && item.inGroup ? " (closed)" : "") + "\n" : "") + "Show requests from one tab";
 }
@@ -1029,7 +1053,7 @@ function renderTabOptions() {
       role: "option", id: "tab-opt-" + it.value, "data-value": it.value,
       "aria-selected": String(it.value === state.tabFilter),
       title: it.closed && it.inGroup ? `${it.title} (closed)` : it.url || it.title,
-    }, h("span", { class: "tab-title" }, it.title), it.count != null ? h("span", { class: "tab-count" }, String(it.count)) : null);
+    }, it.icon ? tabIcon(it.tab) : it.value === "all" ? h("span", { class: "tab-icon" }) : null, h("span", { class: "tab-title" }, it.title), it.count != null ? h("span", { class: "tab-count" }, String(it.count)) : null);
     return li;
   }));
   if (!values.length) tabOptions.append(h("li", { class: "tab-empty" }, "No tab matches."));

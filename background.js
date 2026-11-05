@@ -1337,6 +1337,7 @@ function noteTab(t) {
   tabMeta.set(t.id, {
     title: t.title || old.title || "",
     url: t.url || old.url || "",
+    favIconUrl: t.favIconUrl || (t.url && t.url !== old.url ? "" : old.favIconUrl) || "",
     windowId: t.windowId ?? old.windowId,
     index: t.index ?? old.index ?? 0,
     incognito: !!t.incognito,

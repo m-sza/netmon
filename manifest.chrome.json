@@ -14,7 +14,8 @@
     "management",
     "debugger",
     "declarativeNetRequest",
-    "webNavigation"
+    "webNavigation",
+    "favicon"
   ],
   "host_permissions": [
     "<all_urls>"
