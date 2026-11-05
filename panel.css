@@ -40,6 +40,10 @@
   --tok-re: #b35c00;
   --tok-punc: #6e6e78;
   --tok-val: #8a4b00;
+  /* Two typefaces, one rule: the UI font for labels, controls and plain facts;
+     monospace for text that is shown exactly as sent (URLs, addresses, header,
+     cookie and parameter names and values, bodies, filter syntax, hashes). */
+  --ui: system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   /* Shared control metrics */
   --control-h: 24px;
@@ -108,7 +112,8 @@ body {
   flex-direction: column;
   background: var(--bg);
   color: var(--text);
-  font: 12px/1.4 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif;
+  font: 12px/1.4 var(--ui);
+  font-variant-numeric: tabular-nums; /* digits line up in columns */
   overflow: hidden;
 }
 
@@ -143,7 +148,8 @@ textarea { padding: 5px 8px; resize: vertical; font: 12px/1.45 var(--mono); }
   outline: none;
 }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
-input.mono, textarea.mono { font-family: var(--mono); }
+input.mono, textarea.mono, .mono { font-family: var(--mono); }
+::placeholder { font-family: var(--ui); }
 
 input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 
@@ -212,7 +218,7 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 #btn-record.paused .i-play { display: block; }
 
 
-#filter { flex: 1 1 160px; max-width: 360px; min-width: 120px; }
+#filter { font-family: var(--mono); flex: 1 1 160px; max-width: 360px; min-width: 120px; }
 /* Tab picker: a button that opens a listbox grouped by window. */
 .select-btn {
   display: inline-flex; align-items: center; gap: 6px;
@@ -438,9 +444,9 @@ body.has-details .c-waterfall { display: none; }
   margin-bottom: 10px;
 }
 .summary .k { color: var(--muted); }
-.summary .v { font-family: var(--mono); word-break: break-all; }
+.summary .v { word-break: break-word; }
+.summary .v .mono { word-break: break-all; }
 
-.status-chip { font-family: var(--mono); }
 .status-chip.st-ok { color: var(--ok); }
 .status-chip.st-bad, .status-chip.st-error { color: var(--bad); }
 
@@ -452,9 +458,11 @@ table.kv { width: 100%; border-collapse: collapse; margin: 2px 0 4px; }
 table.kv td {
   padding: 2px 6px 2px 0;
   vertical-align: top;
-  font-family: var(--mono);
-  word-break: break-all;
+  word-break: break-word;
 }
+/* Names and values as sent (headers, cookies, parameters) */
+table.kv.data td { font-family: var(--mono); word-break: break-all; }
+table.kv td .mono { word-break: break-all; }
 table.kv td.k { width: 32%; color: var(--muted); }
 table.kv.wide td.k { width: 22%; }
 
@@ -488,14 +496,14 @@ pre.code, .jtree {
 .font-sample-input { flex: 1; }
 .font-sample { margin: 4px 0 8px; overflow: hidden; }
 .font-row { display: flex; align-items: baseline; gap: 10px; padding: 2px 0; border-bottom: 1px solid var(--border-faint); }
-.font-px { flex: none; width: 36px; color: var(--muted); font: 11px var(--mono); text-align: right; }
+.font-px { flex: none; width: 36px; color: var(--muted); font-size: 11px; text-align: right; }
 .font-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
 .font-charset { margin-top: 10px; font-size: 24px; line-height: 1.4; overflow-wrap: anywhere; }
 
 /* Timings */
 .timings { display: grid; grid-template-columns: max-content 1fr 70px; column-gap: 12px; row-gap: 6px; align-items: center; margin: 6px 0 12px; }
 .timings .label { color: var(--muted); }
-.timings .ms { text-align: right; font-family: var(--mono); }
+.timings .ms { text-align: right; }
 .timings .track { position: relative; height: 10px; }
 .timings .seg { position: absolute; top: 0; height: 100%; min-width: 1px; border-radius: 1px; }
 .seg.blocked { background: var(--pending); }
@@ -573,6 +581,7 @@ pre.code, .jtree {
 .ws-table tr.ws-send .ws-arrow { color: var(--ok); }
 .ws-table tr.ws-recv .ws-arrow { color: var(--bad); }
 .ws-table tr.selected .ws-arrow { color: var(--sel-text); }
+.ws-table .ws-size, .ws-table .ws-time { font-family: var(--ui); }
 .ws-table .ws-size { width: 72px; text-align: right; color: var(--muted); }
 .ws-table .ws-time { width: 96px; text-align: right; color: var(--muted); }
 .ws-table .muted { color: var(--muted); font-style: italic; }
@@ -580,7 +589,7 @@ pre.code, .jtree {
 .ws-tag {
   display: inline-block; margin-right: 6px; padding: 0 4px;
   border-radius: 3px; background: var(--border-faint); color: var(--muted);
-  font: 10px/16px system-ui, sans-serif; vertical-align: 1px;
+  font: 10px/16px var(--ui); vertical-align: 1px;
 }
 .ws-table tr.selected .ws-tag { background: rgba(255, 255, 255, 0.2); color: var(--sel-text); }
 .ws-composer { margin-top: 8px; padding: 8px 10px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--chrome); }
@@ -599,7 +608,15 @@ pre.code, .jtree {
 
 /* Collapsible JSON tree */
 .jtree .jt-line { position: relative; padding-left: 14px; }
-.jtree .jt-kids { margin-left: 5px; padding-left: 12px; border-left: 1px solid var(--border-faint); }
+.jtree .jt-kids { position: relative; padding-left: 18px; }
+/* The section line: a 1px rule under the arrow inside a wider click target. */
+.jtree .jt-guide { position: absolute; left: 1px; top: 0; bottom: 0; width: 12px; cursor: pointer; }
+.jtree .jt-guide::after {
+  content: ""; position: absolute; left: 6px; top: 0; bottom: 0; width: 1px;
+  background: var(--border); transition: background-color 0.1s;
+}
+.jtree .jt-guide:hover::after { left: 5px; width: 3px; border-radius: 2px; background: var(--accent); }
+.jtree .jt-node:has(> .jt-kids > .jt-guide:hover) > .jt-line > .jt-toggle { color: var(--accent); }
 .jtree .jt-toggle {
   position: absolute; left: 0; top: 0;
   width: 14px; text-align: center;

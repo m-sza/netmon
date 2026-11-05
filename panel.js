@@ -1337,8 +1337,9 @@ function note(text, cls) {
   return h("div", { class: "note" + (cls ? " " + cls : "") }, text);
 }
 
-function kvTable(pairs, wide) {
-  return h("table", { class: "kv" + (wide ? " wide" : "") },
+// Label/value facts. With data: true, names and values as sent (monospace).
+function kvTable(pairs, wide, data) {
+  return h("table", { class: "kv" + (wide ? " wide" : "") + (data ? " data" : "") },
     h("tbody", null, pairs.map(([k, v]) => h("tr", null, h("td", { class: "k" }, k), h("td", null, v)))));
 }
 
@@ -1347,6 +1348,9 @@ function section(title, count, ...content) {
     h("summary", null, title, count != null ? h("span", { class: "count" }, ` (${count})`) : null),
     ...content);
 }
+
+// Text shown exactly as sent (URLs, addresses, hashes): monospace.
+const mono = (v) => (v == null || v === "" ? v : h("span", { class: "mono" }, v));
 
 // The request this one hangs under in the tree, as a link that selects it.
 function causedBy(d) {
@@ -1366,21 +1370,21 @@ function renderHeaders(d) {
 
   const cause = causedBy(d);
   const pairs = [
-    ["URL", d.url],
+    ["URL", mono(d.url)],
     ["Method", d.method],
     ["Status", statusText],
     d.httpVersion && ["Version", d.httpVersion],
-    d.ip && ["Address", d.ip],
+    d.ip && ["Address", mono(d.ip)],
     ["Type", `${causeLabel(d.type)}${effectiveMime(d).mime ? " · " + mimeTitle(d) : ""}`],
-    d.initiatorLoc && ["Started by script", d.initiatorLoc],
+    d.initiatorLoc && ["Started by script", mono(d.initiatorLoc)],
     cause && ["Caused by", cause],
-    d.originUrl && ["Initiator", d.originUrl],
-    d.documentUrl && d.documentUrl !== d.originUrl && ["Document", d.documentUrl],
+    d.originUrl && ["Initiator", mono(d.originUrl)],
+    d.documentUrl && d.documentUrl !== d.originUrl && ["Document", mono(d.documentUrl)],
     ["Tab", tabLabel(d.tabId)],
     ["Started", fmtClock(d.start)],
     ["Duration", d.end ? fmtMs(d.end - d.start) : "Pending…"],
     d.fromCache && ["Cache", "Served from cache"],
-    d.redirectUrl && ["Redirected to", d.redirectUrl],
+    d.redirectUrl && ["Redirected to", mono(d.redirectUrl)],
     d.error && ["Error", h("span", { class: "warn", title: failure(d).title }, `${failure(d).text}${failure(d).text !== d.error ? ` (${d.error})` : ""}`)],
     ["Third party", d.thirdParty ? "Yes" : "No"],
   ].filter(Boolean);
@@ -1413,7 +1417,7 @@ function headerSection(title, list, firstLine, pending) {
     const raw = [firstLine, ...list.map((x) => `${x.name}: ${x.value}`)].filter(Boolean).join("\n");
     return section(title, list.length, h("pre", { class: "code" }, raw));
   }
-  return section(title, list.length, kvTable(list.map((x) => [x.name, x.value])));
+  return section(title, list.length, kvTable(list.map((x) => [x.name, x.value]), false, true));
 }
 
 /* Cookies tab */
@@ -1423,11 +1427,11 @@ function renderCookies(d) {
   const out = [];
   out.push(section("Response cookies", resCookies.length,
     resCookies.length
-      ? h("table", { class: "kv" }, h("tbody", null, resCookies.map((c) =>
+      ? h("table", { class: "kv data" }, h("tbody", null, resCookies.map((c) =>
           h("tr", null, h("td", { class: "k" }, c.name), h("td", null, c.value, c.attrs.length ? h("div", { class: "note" }, c.attrs.join("; ")) : null)))))
       : note("No cookies set by this response.")));
   out.push(section("Request cookies", reqCookies.length,
-    reqCookies.length ? kvTable(reqCookies.map((c) => [c.name, c.value])) : note("No cookies sent with this request.")));
+    reqCookies.length ? kvTable(reqCookies.map((c) => [c.name, c.value]), false, true) : note("No cookies sent with this request.")));
   return out;
 }
 
@@ -1436,7 +1440,7 @@ function renderRequest(d) {
   const out = [];
   const u = safeUrl(d.url);
   const params = u ? [...u.searchParams] : [];
-  if (params.length) out.push(section("Query string", params.length, kvTable(params)));
+  if (params.length) out.push(section("Query string", params.length, kvTable(params, false, true)));
 
   const rb = d.requestBody;
   if (!rb) {
@@ -1445,7 +1449,7 @@ function renderRequest(d) {
     out.push(note(`${BROWSER} couldn't read the request body: ${rb.error}`, "warn"));
   } else if (rb.formData) {
     const pairs = Object.entries(rb.formData).flatMap(([k, vs]) => vs.map((v) => [k, v]));
-    out.push(section("Form data", pairs.length, kvTable(pairs)));
+    out.push(section("Form data", pairs.length, kvTable(pairs, false, true)));
   } else if (rb.raw) {
     const ct = parseContentType(header(d.requestHeaders, "content-type"));
     const content = [bodyView(rb.raw, ct.mime, ct.charset, d.url)];
@@ -1664,6 +1668,7 @@ function bodyView(buf, mime, charset, url, ctx) {
   const lang = Syntax.langFor(mime, url, text);
   const tree = lang === "json" && text.length <= TEXT_LIMIT ? JsonTree.render(text) : null;
   const preview = lang === "html" ? htmlPreview(text, url, ctx) : null;
+  if (tree) tree.el.addEventListener("contextmenu", (ev) => jsonMenu(ev, tree));
 
   const pre = h("pre", { class: "code" });
   const limitNote = note(`Showing the first ${TEXT_LIMIT.toLocaleString()} characters.`);
@@ -1703,6 +1708,27 @@ function bodyView(buf, mime, charset, url, ctx) {
 
   wrap.append(actions, limitNote, plainNote, ...(tree ? [tree.el] : []), ...(preview ? [preview] : []), pre);
   return wrap;
+}
+
+// Right-click in a JSON tree: copy the key, the value or section, the object
+// it sits in, or its path.
+function jsonMenu(ev, tree) {
+  const e = tree.entryAt(ev.target);
+  if (!e) return;
+  ev.preventDefault();
+  const sel = String(window.getSelection() || "");
+  const what = e.kind === "value" ? "Value" : e.kind === "object" ? "Object" : "Array";
+  openMenu(ev.clientX, ev.clientY, [
+    sel && { label: "Copy Selection", run: () => copy(sel, "Selection copied") },
+    sel && "-",
+    e.index != null
+      ? { label: `Copy Index (${e.index})`, run: () => copy(String(e.index), "Index copied") }
+      : { label: "Copy Key", disabled: e.key == null, run: () => copy(e.key, "Key copied") },
+    { label: `Copy ${what}`, run: () => copy(e.value(), `${what} copied`) },
+    { label: e.parentKind === "array" ? "Copy Parent Array" : "Copy Parent Object", disabled: !e.parent, run: () => copy(e.parent(), `Parent ${e.parentKind || "object"} copied`) },
+    "-",
+    { label: "Copy Path", disabled: !e.path, run: () => copy(e.path, "Path copied") },
+  ]);
 }
 
 /* Timings tab */
@@ -2018,12 +2044,12 @@ function renderSecurity(d) {
   out.push(section("Connection", null, kvTable(rows([
     ["State", STATES[s.state] || s.state],
     ["Protocol", s.protocolVersion],
-    ["Cipher suite", s.cipherSuite],
+    ["Cipher suite", mono(s.cipherSuite)],
     ["Key exchange group", s.keaGroupName],
     ["Signature scheme", s.signatureSchemeName],
     ["Key length", s.secretKeyLength ? `${s.secretKeyLength} bits` : null],
     ["HTTP version", d.httpVersion],
-    ["Remote address", d.ip],
+    ["Remote address", mono(d.ip)],
     ["Encrypted Client Hello", yn(s.usedEch)],
     ["Encrypted DNS", yn(s.usedPrivateDns)],
     ["OCSP stapling", yn(s.usedOcsp)],
@@ -2041,15 +2067,15 @@ function renderSecurity(d) {
     const fp = c.fingerprint || {};
     const title = i === 0 ? "Server certificate" : i === certs.length - 1 && c.isBuiltInRoot ? "Root certificate" : "Intermediate certificate";
     out.push(section(title, null, kvTable(rows([
-      ["Subject", c.subject],
-      ["Issuer", c.issuer],
+      ["Subject", mono(c.subject)],
+      ["Issuer", mono(c.issuer)],
       ["Valid from", v.start ? new Date(v.start).toLocaleString() : null],
       ["Valid until", v.end ? new Date(v.end).toLocaleString() : null],
-      ["Serial number", c.serialNumber],
-      ["SHA-256 fingerprint", fp.sha256],
-      ["SHA-1 fingerprint", fp.sha1],
-      ["Public key SHA-256", c.subjectPublicKeyInfoDigest && c.subjectPublicKeyInfoDigest.sha256],
-      ["Alternative names", c.sanList && c.sanList.join(", ")],
+      ["Serial number", mono(c.serialNumber)],
+      ["SHA-256 fingerprint", mono(fp.sha256)],
+      ["SHA-1 fingerprint", mono(fp.sha1)],
+      ["Public key SHA-256", mono(c.subjectPublicKeyInfoDigest && c.subjectPublicKeyInfoDigest.sha256)],
+      ["Alternative names", mono(c.sanList && c.sanList.join(", "))],
       ["Built-in root", c.isBuiltInRoot ? "Yes" : null],
     ]), true)));
   });
