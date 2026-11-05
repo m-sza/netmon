@@ -50,6 +50,8 @@
   --header-h: 28px;           /* table header and details tab bar */
   --radius: 4px;
   --radius-lg: 8px;           /* popovers, menus, dialogs */
+  --tg-grey: #5f6368; --tg-blue: #1a73e8; --tg-red: #d93025; --tg-yellow: #f9ab00; --tg-green: #188038;
+  --tg-pink: #d01884; --tg-purple: #9334e6; --tg-cyan: #007b83; --tg-orange: #fa903e;
   --menu-pad: 4px;            /* inside menus and listbox popovers */
   --item-pad-x: 10px;         /* menu and listbox items */
   --border-strong: #c4c4cc;   /* control borders on hover */
@@ -98,6 +100,8 @@
     --tok-re: #ffb86b;
     --tok-punc: #a0a0aa;
     --tok-val: #ffd0a0;
+    --tg-grey: #dadce0; --tg-blue: #8ab4f8; --tg-red: #f28b82; --tg-yellow: #fdd663; --tg-green: #81c995;
+    --tg-pink: #ff8bcb; --tg-purple: #c58af9; --tg-cyan: #78d9ec; --tg-orange: #fcad70;
     --border-strong: #55545f;
     --on-accent: #0e1a26;
     --ring: 0 0 0 2px rgb(117 191 255 / 35%);
@@ -260,6 +264,20 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
   padding: 0 var(--item-pad-x); border-radius: var(--radius); cursor: default;
 }
 #tab-options .tab-opt.in-group { padding-left: calc(var(--item-pad-x) + 8px); }
+#tab-options .tab-opt.in-tabgroup { padding-left: calc(var(--item-pad-x) + 24px); }
+/* Tab group heading inside a window, with the group's color (the same nine
+   colors Chrome and Firefox offer). */
+#tab-options .tab-subgroup {
+  display: flex; align-items: center; gap: 8px;
+  box-sizing: border-box; height: var(--control-h);
+  padding: 0 var(--item-pad-x) 0 calc(var(--item-pad-x) + 8px);
+  font-weight: 600;
+}
+#tab-options .tab-subgroup .tab-group-note { flex: none; color: var(--muted); font-size: 11px; font-weight: normal; }
+#tab-options .tab-subgroup.tab-closed .tab-title { text-decoration: line-through; color: var(--muted); }
+.tg-dot { flex: none; width: 16px; display: inline-flex; justify-content: center; }
+.tg-dot::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--tg); }
+.tab-closed .tg-dot { opacity: 0.5; }
 #tab-options .tab-opt.hl { background: var(--menu-hover); }
 #tab-options .tab-opt[aria-selected=true] { color: var(--accent); font-weight: 600; }
 .tab-icon { flex: none; display: inline-flex; width: 16px; height: 16px; }

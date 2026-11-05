@@ -993,12 +993,32 @@ function tabItems() {
     const A = tabTitles.get(a), B = tabTitles.get(b);
     return (A.index - B.index) || (a - b);
   });
+  const groups = new Map((tabInfo.groups || []).map((g) => [g.id, g]));
+  const tabItem = (id, depth) => {
+    const t = tabTitles.get(id);
+    return { value: String(id), title: tabTitleOf(t, id), url: t ? t.url : "", closed: !t || t.closed, count: counts.get(id) || 0, inGroup: true, depth, tab: t || null, icon: true };
+  };
+  // A window's tabs in tab-strip order; the tabs of a tab group sit together
+  // under the group's name, where the group's first tab is.
   const addGroup = (label, note, ids) => {
     if (!ids.length) return;
-    items.push({ group: label, note });
+    items.push({ group: label, note, level: 1 });
+    const blocks = [];
+    const byGroup = new Map();
     for (const id of ids) {
-      const t = tabTitles.get(id);
-      items.push({ value: String(id), title: tabTitleOf(t, id), url: t ? t.url : "", closed: !t || t.closed, count: counts.get(id) || 0, inGroup: true, tab: t || null, icon: true });
+      const gid = (tabTitles.get(id) || {}).groupId ?? -1;
+      if (gid < 0) { blocks.push(id); continue; }
+      if (!byGroup.has(gid)) { const b = { gid, ids: [] }; byGroup.set(gid, b); blocks.push(b); }
+      byGroup.get(gid).ids.push(id);
+    }
+    for (const b of blocks) {
+      if (typeof b === "number") { items.push(tabItem(b, 1)); continue; }
+      const g = groups.get(b.gid) || {};
+      const open = b.ids.filter((id) => !tabTitles.get(id).closed).length;
+      const notes = [`${open} tab${open === 1 ? "" : "s"}`];
+      if (g.closed) notes.push("closed group");
+      items.push({ group: g.title || "Unnamed group", note: notes.join(" · "), level: 2, color: g.color || "grey", closed: !!g.closed });
+      for (const id of b.ids) items.push(tabItem(id, 2));
     }
   };
 
@@ -1020,8 +1040,8 @@ function tabItems() {
   }
   if (unknown.length) addGroup("Closed tabs", "", unknown.sort((a, b) => a - b));
 
-  items.push({ group: "Other" });
-  items.push({ value: "none", title: "No tab (browser / extensions)", count: counts.get(-1) || 0, inGroup: true });
+  items.push({ group: "Other", level: 1 });
+  items.push({ value: "none", title: "No tab (browser / extensions)", count: counts.get(-1) || 0, inGroup: true, depth: 1 });
   return items;
 }
 
@@ -1041,15 +1061,28 @@ function renderTabOptions() {
   let items = tabItems();
   if (q) {
     items = items.filter((it) => it.group || (it.title + " " + (it.url || "")).toLowerCase().includes(q));
-    items = items.filter((it, i) => !it.group || (items[i + 1] && !items[i + 1].group)); // drop empty groups
+    // Drop headings with no matching tab before the next heading of the same or a higher level.
+    items = items.filter((it, i) => {
+      if (!it.group) return true;
+      for (const next of items.slice(i + 1)) {
+        if (!next.group) return true;
+        if (next.level <= it.level) return false;
+      }
+      return false;
+    });
   }
   const values = items.filter((it) => !it.group).map((it) => it.value);
   if (!values.includes(tabHighlight)) tabHighlight = values.includes(state.tabFilter) ? state.tabFilter : values[0] ?? null;
 
   tabOptions.replaceChildren(...items.map((it) => {
+    if (it.group && it.level === 2) {
+      return h("li", { class: "tab-subgroup" + (it.closed ? " tab-closed" : ""), role: "presentation" },
+        h("span", { class: "tg-dot", style: `--tg:var(--tg-${it.color}, var(--tg-grey))` }),
+        h("span", { class: "tab-title" }, it.group), h("span", { class: "tab-group-note" }, it.note));
+    }
     if (it.group) return h("li", { class: "tab-group", role: "presentation" }, it.group, it.note ? h("span", { class: "tab-group-note" }, it.note) : null);
     const li = h("li", {
-      class: "tab-opt" + (it.inGroup ? " in-group" : "") + (it.closed ? " tab-closed" : "") + (it.value === tabHighlight ? " hl" : ""),
+      class: "tab-opt" + (it.inGroup ? " in-group" : "") + (it.depth === 2 ? " in-tabgroup" : "") + (it.closed ? " tab-closed" : "") + (it.value === tabHighlight ? " hl" : ""),
       role: "option", id: "tab-opt-" + it.value, "data-value": it.value,
       "aria-selected": String(it.value === state.tabFilter),
       title: it.closed && it.inGroup ? `${it.title} (closed)` : it.url || it.title,
@@ -1138,7 +1171,10 @@ browser.tabs.onAttached.addListener(scheduleTabRefresh);
 browser.tabs.onMoved.addListener(scheduleTabRefresh);
 browser.windows.onCreated.addListener(scheduleTabRefresh);
 browser.windows.onRemoved.addListener(scheduleTabRefresh);
-browser.tabs.onUpdated.addListener((id, info) => { if (info.title || info.url) scheduleTabRefresh(); });
+browser.tabs.onUpdated.addListener((id, info) => { if (info.title || info.url || info.favIconUrl || "groupId" in info) scheduleTabRefresh(); });
+if (browser.tabGroups && browser.tabGroups.onUpdated) {
+  for (const ev of ["onCreated", "onUpdated", "onRemoved", "onMoved"]) if (browser.tabGroups[ev]) browser.tabGroups[ev].addListener(scheduleTabRefresh);
+}
 
 
 /* ---------------------------------------------------------------------------

@@ -1328,18 +1328,30 @@ function clearAll() {
  * Tab memory: the last title, URL and window of every tab, kept after the tab
  * closes, so the panel can name closed tabs and group tabs by window.
  * ------------------------------------------------------------------------- */
-const tabMeta = new Map(); // tabId -> { title, url, windowId, index, incognito, closed, closedAt }
+const tabMeta = new Map(); // tabId -> { title, url, favIconUrl, windowId, index, groupId, incognito, closed, closedAt }
+// Tab groups (Chrome; Firefox 139+). Kept after a group is closed, so closed
+// tabs still show under their group's name.
+const tabGroupsApi = browser.tabGroups && browser.tabGroups.query ? browser.tabGroups : null;
+const groupMeta = new Map(); // groupId -> { title, color, windowId }
+const noteGroup = (g) => { if (g && g.id != null && g.id >= 0) groupMeta.set(g.id, { title: g.title || "", color: g.color || "grey", windowId: g.windowId }); };
+if (tabGroupsApi) {
+  tabGroupsApi.query({}).then((gs) => gs.forEach(noteGroup), () => {});
+  for (const ev of ["onCreated", "onUpdated", "onMoved"]) if (tabGroupsApi[ev]) tabGroupsApi[ev].addListener(noteGroup);
+}
 const MAX_CLOSED_TABS = 500;
 
 function noteTab(t) {
   if (!t || t.id == null || t.id < 0 || (t.url || "").startsWith(OWN_ORIGIN)) return;
   const old = tabMeta.get(t.id) || {};
+  // Chrome detaches a closing tab first (index -1, no group); keep where it was.
+  const leaving = t.index != null && t.index < 0;
   tabMeta.set(t.id, {
     title: t.title || old.title || "",
     url: t.url || old.url || "",
     favIconUrl: t.favIconUrl || (t.url && t.url !== old.url ? "" : old.favIconUrl) || "",
     windowId: t.windowId ?? old.windowId,
-    index: t.index ?? old.index ?? 0,
+    index: leaving ? old.index ?? 0 : t.index ?? old.index ?? 0,
+    groupId: leaving ? old.groupId ?? -1 : t.groupId ?? old.groupId ?? -1,
     incognito: !!t.incognito,
     closed: false,
   });
@@ -1369,13 +1381,17 @@ browser.tabs.onRemoved.addListener((id) => {
 });
 
 async function tabList() {
-  const [tabs, wins] = await Promise.all([browser.tabs.query({}), browser.windows.getAll({})]);
+  const [tabs, wins, groups] = await Promise.all([browser.tabs.query({}), browser.windows.getAll({}),
+    tabGroupsApi ? tabGroupsApi.query({}).catch(() => []) : []]);
+  for (const g of groups) noteGroup(g);
+  const openGroups = new Set(groups.map((g) => g.id));
   for (const t of tabs) noteTab(t); // fills in anything an event missed
   const open = new Set(tabs.map((t) => t.id));
   for (const [id, m] of tabMeta) if (!m.closed && !open.has(id)) { m.closed = true; m.closedAt = Date.now(); }
   return {
     tabs: [...tabMeta].map(([id, m]) => ({ id, ...m })),
     windows: wins.map((w) => ({ id: w.id, focused: !!w.focused, incognito: !!w.incognito, type: w.type })),
+    groups: [...groupMeta].map(([id, g]) => ({ id, ...g, closed: !openGroups.has(id) })),
     panelWindowId: (tabs.find((t) => t.id === panelTabId) || {}).windowId ?? null,
   };
 }

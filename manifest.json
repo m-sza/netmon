@@ -20,6 +20,7 @@
     "<all_urls>",
     "storage",
     "tabs",
+    "tabGroups",
     "downloads",
     "clipboardWrite",
     "scripting",
