@@ -609,15 +609,17 @@ pre.code, .jtree {
 /* Collapsible JSON tree */
 .jtree .jt-line { position: relative; padding-left: 14px; }
 .jtree .jt-kids { position: relative; padding-left: 18px; }
-/* The section line: a 1px rule under the arrow inside a wider click target. */
-.jtree .jt-guide { position: absolute; left: 1px; top: 0; bottom: 0; width: 12px; cursor: pointer; }
+/* The section line: a 1px rule under the arrow. Its click target spans the
+   whole indent step (the .jt-kids padding), so the targets of neighboring
+   levels touch: moving sideways goes straight from one line to the next. */
+.jtree .jt-guide { position: absolute; left: 0; top: 0; bottom: 0; width: 18px; cursor: pointer; }
 .jtree .jt-guide::after {
-  content: ""; position: absolute; left: 6px; top: 0; bottom: 0; width: 1px;
+  content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 1px;
   background: var(--border); transition: background-color 0.1s;
 }
 /* Hovering either the arrow or the line highlights both: they do the same thing. */
 .jtree .jt-node:is(:has(> .jt-kids > .jt-guide:hover), :has(> .jt-line > .jt-toggle:hover)) > .jt-kids > .jt-guide::after {
-  left: 5.5px; width: 2px; border-radius: 1px; background: var(--accent);
+  left: 6.5px; width: 2px; border-radius: 1px; background: var(--accent);
 }
 .jtree .jt-node:has(> .jt-kids > .jt-guide:hover) > .jt-line > .jt-toggle,
 .jtree .jt-toggle:hover { color: var(--accent); }
