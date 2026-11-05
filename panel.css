@@ -615,15 +615,18 @@ pre.code, .jtree {
   content: ""; position: absolute; left: 6px; top: 0; bottom: 0; width: 1px;
   background: var(--border); transition: background-color 0.1s;
 }
-.jtree .jt-guide:hover::after { left: 5px; width: 3px; border-radius: 2px; background: var(--accent); }
-.jtree .jt-node:has(> .jt-kids > .jt-guide:hover) > .jt-line > .jt-toggle { color: var(--accent); }
+/* Hovering either the arrow or the line highlights both: they do the same thing. */
+.jtree .jt-node:is(:has(> .jt-kids > .jt-guide:hover), :has(> .jt-line > .jt-toggle:hover)) > .jt-kids > .jt-guide::after {
+  left: 5.5px; width: 2px; border-radius: 1px; background: var(--accent);
+}
+.jtree .jt-node:has(> .jt-kids > .jt-guide:hover) > .jt-line > .jt-toggle,
+.jtree .jt-toggle:hover { color: var(--accent); }
 .jtree .jt-toggle {
   position: absolute; left: 0; top: 0;
   width: 14px; text-align: center;
   color: var(--muted); cursor: pointer; user-select: none;
 }
 .jtree .jt-toggle::before { content: "▾"; }
-.jtree .jt-toggle:hover { color: var(--text); }
 .jtree .jt-node.collapsed > .jt-line > .jt-toggle::before { content: "▸"; }
 .jtree .jt-node.collapsed > .jt-kids,
 .jtree .jt-node.collapsed > .jt-kids + .jt-line,
