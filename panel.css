@@ -270,10 +270,21 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 #tab-options .tab-subgroup {
   display: flex; align-items: center; gap: 8px;
   box-sizing: border-box; height: var(--control-h);
-  padding: 0 var(--item-pad-x) 0 calc(var(--item-pad-x) + 8px);
+  padding: 0 var(--item-pad-x) 0 calc(var(--item-pad-x) - 4px);
+  border-radius: var(--radius); cursor: default;
   font-weight: 600;
 }
+#tab-options .tab-subgroup.hl { background: var(--menu-hover); }
+/* Same chevron as the dropdown button: right when closed, down when open. */
+.tg-chevron { flex: none; width: 12px; height: 12px; display: inline-flex; align-items: center; justify-content: center; margin-right: -4px; }
+.tg-chevron::before {
+  content: ""; width: 5px; height: 5px;
+  border: solid var(--muted); border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg);
+}
+.tab-subgroup[aria-expanded=true] .tg-chevron::before { transform: rotate(45deg) translate(-1px, -1px); }
 #tab-options .tab-subgroup .tab-group-note { flex: none; color: var(--muted); font-size: 11px; font-weight: normal; }
+#tab-options .tab-subgroup .tab-title { flex: 0 1 auto; }
+#tab-options .tab-subgroup .tab-group-note { flex: 1; }
 #tab-options .tab-subgroup.tab-closed .tab-title { text-decoration: line-through; color: var(--muted); }
 .tg-dot { flex: none; width: 16px; display: inline-flex; justify-content: center; }
 .tg-dot::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--tg); }
@@ -284,8 +295,8 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 .tab-icon img { width: 16px; height: 16px; object-fit: contain; }
 .tab-icon.blank { color: var(--muted); }
 .tab-closed .tab-icon { opacity: 0.5; filter: grayscale(1); }
-.tab-opt .tab-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.tab-opt .tab-count { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; font-weight: normal; }
+:is(.tab-opt, .tab-subgroup) .tab-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+:is(.tab-opt, .tab-subgroup) .tab-count { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; font-weight: normal; }
 .tab-closed .tab-title, .select-btn.tab-closed .select-label { text-decoration: line-through; color: var(--muted); }
 #tab-options .tab-empty { padding: 4px var(--item-pad-x); color: var(--muted); }
 #btn-har svg { fill: none; }

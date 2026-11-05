@@ -927,6 +927,8 @@ const tabSearch = $("tab-search");
 const tabOptions = $("tab-options");
 let tabInfo = { tabs: [], windows: [], panelWindowId: null };
 let tabHighlight = null; // value of the highlighted option
+// Tab groups start collapsed; these are the ones opened in this panel session.
+const openTabGroups = new Set();
 
 async function refreshTabs() {
   tabsDirty = false;
@@ -994,9 +996,9 @@ function tabItems() {
     return (A.index - B.index) || (a - b);
   });
   const groups = new Map((tabInfo.groups || []).map((g) => [g.id, g]));
-  const tabItem = (id, depth) => {
+  const tabItem = (id, depth, gid) => {
     const t = tabTitles.get(id);
-    return { value: String(id), title: tabTitleOf(t, id), url: t ? t.url : "", closed: !t || t.closed, count: counts.get(id) || 0, inGroup: true, depth, tab: t || null, icon: true };
+    return { value: String(id), title: tabTitleOf(t, id), url: t ? t.url : "", closed: !t || t.closed, count: counts.get(id) || 0, inGroup: true, depth, gid, tab: t || null, icon: true };
   };
   // A window's tabs in tab-strip order; the tabs of a tab group sit together
   // under the group's name, where the group's first tab is.
@@ -1017,8 +1019,10 @@ function tabItems() {
       const open = b.ids.filter((id) => !tabTitles.get(id).closed).length;
       const notes = [`${open} tab${open === 1 ? "" : "s"}`];
       if (g.closed) notes.push("closed group");
-      items.push({ group: g.title || "Unnamed group", note: notes.join(" · "), level: 2, color: g.color || "grey", closed: !!g.closed });
-      for (const id of b.ids) items.push(tabItem(id, 2));
+      const requests = b.ids.reduce((n, id) => n + (counts.get(id) || 0), 0);
+      items.push({ group: g.title || "Unnamed group", note: notes.join(" · "), level: 2, color: g.color || "grey", closed: !!g.closed,
+        value: "group:" + b.gid, gid: b.gid, count: requests });
+      for (const id of b.ids) items.push(tabItem(id, 2, b.gid));
     }
   };
 
@@ -1071,14 +1075,26 @@ function renderTabOptions() {
       return false;
     });
   }
-  const values = items.filter((it) => !it.group).map((it) => it.value);
-  if (!values.includes(tabHighlight)) tabHighlight = values.includes(state.tabFilter) ? state.tabFilter : values[0] ?? null;
+  // Collapsed groups hide their tabs, except while searching.
+  if (!q) items = items.filter((it) => it.group || it.gid == null || openTabGroups.has(it.gid));
+  const values = items.filter((it) => !it.group || it.level === 2).map((it) => it.value);
+  if (!values.includes(tabHighlight)) {
+    tabHighlight = values.includes(state.tabFilter) ? state.tabFilter
+      : values.find((v) => !v.startsWith("group:")) ?? values[0] ?? null; // a tab first, so Enter picks it
+  }
 
   tabOptions.replaceChildren(...items.map((it) => {
     if (it.group && it.level === 2) {
-      return h("li", { class: "tab-subgroup" + (it.closed ? " tab-closed" : ""), role: "presentation" },
+      const open = !!q || openTabGroups.has(it.gid);
+      return h("li", {
+        class: "tab-subgroup" + (it.closed ? " tab-closed" : "") + (it.value === tabHighlight ? " hl" : ""),
+        role: "option", id: "tab-opt-" + it.value, "data-value": it.value, "aria-expanded": String(open), "aria-selected": "false",
+        title: open ? "Collapse this group" : "Show this group's tabs",
+      },
+        h("span", { class: "tg-chevron" }),
         h("span", { class: "tg-dot", style: `--tg:var(--tg-${it.color}, var(--tg-grey))` }),
-        h("span", { class: "tab-title" }, it.group), h("span", { class: "tab-group-note" }, it.note));
+        h("span", { class: "tab-title" }, it.group), h("span", { class: "tab-group-note" }, it.note),
+        h("span", { class: "tab-count" }, String(it.count)));
     }
     if (it.group) return h("li", { class: "tab-group", role: "presentation" }, it.group, it.note ? h("span", { class: "tab-group-note" }, it.note) : null);
     const li = h("li", {
@@ -1095,12 +1111,21 @@ function renderTabOptions() {
 
 function highlightTab(value, scroll) {
   tabHighlight = value;
-  for (const li of tabOptions.querySelectorAll(".tab-opt")) li.classList.toggle("hl", li.dataset.value === value);
+  for (const li of tabOptions.querySelectorAll(".tab-opt, .tab-subgroup")) li.classList.toggle("hl", li.dataset.value === value);
   tabSearch.setAttribute("aria-activedescendant", value != null ? "tab-opt-" + value : "");
-  if (scroll) { const li = tabOptions.querySelector(`.tab-opt[data-value="${CSS.escape(value)}"]`); if (li) li.scrollIntoView({ block: "nearest" }); }
+  if (scroll) { const li = tabOptions.querySelector(`[data-value="${CSS.escape(value)}"]`); if (li) li.scrollIntoView({ block: "nearest" }); }
+}
+
+function toggleTabGroup(value, open) {
+  const gid = Number(value.slice(6));
+  if (open ?? !openTabGroups.has(gid)) openTabGroups.add(gid); else openTabGroups.delete(gid);
+  tabHighlight = value;
+  renderTabOptions();
+  highlightTab(value, true);
 }
 
 function chooseTab(value) {
+  if (value && value.startsWith("group:")) { toggleTabGroup(value); return; }
   closeTabPop();
   tabSelect.focus();
   if (value == null || value === state.tabFilter) return;
@@ -1112,6 +1137,10 @@ function chooseTab(value) {
 function openTabPop() {
   tabSearch.value = "";
   tabHighlight = state.tabFilter;
+  // The group holding the selected tab opens, so the selection is visible.
+  const selId = state.tabFilter === "current" ? state.originTabId : Number(state.tabFilter);
+  const selTab = selId != null ? tabTitles.get(selId) : null;
+  if (selTab && selTab.groupId >= 0 && state.tabFilter !== "current") openTabGroups.add(selTab.groupId);
   renderTabOptions();
   tabPop.hidden = false;
   tabSelect.setAttribute("aria-expanded", "true");
@@ -1136,7 +1165,7 @@ document.addEventListener("mousedown", (ev) => {
 });
 tabSearch.addEventListener("input", () => { tabHighlight = null; renderTabOptions(); highlightTab(tabHighlight, true); });
 tabPop.addEventListener("keydown", (ev) => {
-  const values = [...tabOptions.querySelectorAll(".tab-opt")].map((li) => li.dataset.value);
+  const values = [...tabOptions.querySelectorAll(".tab-opt, .tab-subgroup")].map((li) => li.dataset.value);
   const i = values.indexOf(tabHighlight);
   const move = (to) => { ev.preventDefault(); if (values.length) highlightTab(values[Math.max(0, Math.min(values.length - 1, to))], true); };
   switch (ev.key) {
@@ -1147,16 +1176,20 @@ tabPop.addEventListener("keydown", (ev) => {
     case "Home": if (!tabSearch.value) move(0); break;
     case "End": if (!tabSearch.value) move(values.length - 1); break;
     case "Enter": ev.preventDefault(); chooseTab(tabHighlight); break;
+    case "ArrowRight":
+    case "ArrowLeft": // open/close a highlighted group (the search box keeps its caret keys while typing)
+      if (!tabSearch.value && tabHighlight && tabHighlight.startsWith("group:")) { ev.preventDefault(); toggleTabGroup(tabHighlight, ev.key === "ArrowRight"); }
+      break;
     case "Escape": ev.preventDefault(); ev.stopPropagation(); closeTabPop(); tabSelect.focus(); break;
     case "Tab": closeTabPop(); break;
   }
 });
 tabOptions.addEventListener("mousemove", (ev) => {
-  const li = ev.target.closest(".tab-opt");
+  const li = ev.target.closest(".tab-opt, .tab-subgroup");
   if (li && li.dataset.value !== tabHighlight) highlightTab(li.dataset.value, false);
 });
 tabOptions.addEventListener("click", (ev) => {
-  const li = ev.target.closest(".tab-opt");
+  const li = ev.target.closest(".tab-opt, .tab-subgroup");
   if (li) chooseTab(li.dataset.value);
 });
 
