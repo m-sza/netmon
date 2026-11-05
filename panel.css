@@ -213,7 +213,50 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 
 
 #filter { flex: 1 1 160px; max-width: 360px; min-width: 120px; }
-#tab-filter { max-width: 200px; }
+/* Tab picker: a button that opens a listbox grouped by window. */
+.select-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  box-sizing: border-box; height: var(--control-h); max-width: 240px;
+  padding: 0 6px 0 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--input-bg); cursor: pointer; text-align: left;
+}
+.select-btn:hover { border-color: var(--border-strong); }
+.select-btn[aria-expanded=true] { border-color: var(--accent); box-shadow: var(--ring); }
+.select-btn .select-label { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.select-btn::after {
+  content: ""; flex: none; width: 6px; height: 6px; margin: -3px 2px 0 0;
+  border: solid var(--muted); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
+}
+#tab-pop {
+  position: fixed; z-index: 20;
+  width: min(440px, calc(100vw - 16px)); max-height: min(70vh, 600px);
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 6px;
+  background: var(--menu-bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+#tab-search { width: 100%; flex: none; }
+#tab-options { list-style: none; margin: 0; padding: 0; overflow: auto; min-height: 0; }
+#tab-options .tab-group {
+  display: flex; gap: 6px; align-items: baseline;
+  padding: 8px 8px 3px; color: var(--muted); font-size: 11px; font-weight: 600;
+  position: sticky; top: 0; background: var(--menu-bg);
+}
+#tab-options .tab-group:first-child { padding-top: 2px; }
+#tab-options .tab-group .tab-group-note { font-weight: normal; }
+#tab-options .tab-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 8px; border-radius: var(--radius); cursor: default;
+}
+#tab-options .tab-opt.in-group { padding-left: 16px; }
+#tab-options .tab-opt.hl { background: var(--menu-hover); }
+#tab-options .tab-opt[aria-selected=true] { color: var(--accent); font-weight: 600; }
+.tab-opt .tab-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tab-opt .tab-count { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; font-weight: normal; }
+.tab-closed .tab-title, .select-btn.tab-closed .select-label { text-decoration: line-through; color: var(--muted); }
+#tab-options .tab-empty { padding: 6px 8px; color: var(--muted); }
 #btn-har svg { fill: none; }
 
 /* ---------------- Layout ---------------- */

@@ -24,7 +24,7 @@ const BROWSER = IS_CHROME ? "Chrome" : "Firefox";
  * State
  * ------------------------------------------------------------------------- */
 const store = new Map();  // id -> summary, in arrival order
-const tabTitles = new Map();
+const tabTitles = new Map(); // tabId -> { title, url, windowId, index, incognito, closed } (closed tabs too)
 
 const state = {
   filterTokens: [],
@@ -271,7 +271,10 @@ function statusClass(s) {
 
 function tabLabel(tabId) {
   if (tabId == null || tabId < 0) return "No tab (browser / extensions)";
-  return tabTitles.get(tabId) || `Closed tab #${tabId}`;
+  const t = tabTitles.get(tabId);
+  if (!t) return `Tab #${tabId} (closed)`;
+  const title = t.title || t.url || `Tab #${tabId}`;
+  return t.closed ? `${title} (closed)` : title;
 }
 
 async function copyText(text, btn) {
@@ -907,59 +910,210 @@ $("view-mode").addEventListener("click", (ev) => {
 });
 try { if (localStorage.getItem("viewMode") === "tree") setViewMode("tree"); } catch { /* storage unavailable */ }
 
-tabSelect.addEventListener("change", () => {
-  state.tabFilter = tabSelect.value;
-  applyFilters();
-});
-tabSelect.addEventListener("focus", () => refreshTabs());
 
 $("btn-har").addEventListener("click", () => {
   saveHar(visibleIds()).catch((err) => toast(`Couldn't save HAR: ${err.message || err}`));
 });
 
 /* ---------------------------------------------------------------------------
- * Tabs dropdown
+ * Tab picker: "Current tab" and "All tabs" first, then the tabs grouped by
+ * browser window in tab-strip order. Closed tabs that still have requests
+ * stay under their window with their last title crossed out; the background
+ * remembers titles and windows after tabs close. A native <select> can't
+ * show crossed-out options in every browser, so this is a listbox popover.
  * ------------------------------------------------------------------------- */
-// Dropdown: "Current tab" (default) and "All tabs" first, then every tab: the
-// open ones, and closed ones that still have requests in the list.
+const tabPop = $("tab-pop");
+const tabSearch = $("tab-search");
+const tabOptions = $("tab-options");
+let tabInfo = { tabs: [], windows: [], panelWindowId: null };
+let tabHighlight = null; // value of the highlighted option
+
 async function refreshTabs() {
   tabsDirty = false;
-  const tabs = await browser.tabs.query({});
+  let info;
+  try { info = await browser.runtime.sendMessage({ cmd: "tabList" }); } catch { return; }
+  if (!info) return;
+  tabInfo = info;
   tabTitles.clear();
-  for (const t of tabs) {
-    if ((t.url || "").startsWith(OWN_ORIGIN)) continue;
-    tabTitles.set(t.id, t.title || t.url || `Tab #${t.id}`);
-  }
-  const ids = new Set(tabTitles.keys());
-  for (const s of store.values()) if (s.tabId >= 0) ids.add(s.tabId);
-
-  const truncate = (t, n = 60) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
-  const origin = state.originTabId;
-  const keep = state.tabFilter;
-  tabSelect.replaceChildren(
-    h("option", { value: "current" }, origin != null ? `Current tab (${truncate(tabLabel(origin), 40)})` : "Current tab"),
-    h("option", { value: "all" }, "All tabs"),
-    h("optgroup", { label: "Tabs" },
-      [...ids].sort((a, b) => a - b).map((id) => h("option", { value: String(id) }, truncate(tabLabel(id))))),
-    h("optgroup", { label: "Other" },
-      h("option", { value: "none" }, "No tab (browser / extensions)")),
-  );
-  tabSelect.value = keep;
-  if (tabSelect.value !== keep) {
-    tabSelect.value = "current";
+  for (const t of info.tabs) tabTitles.set(t.id, t);
+  const f = state.tabFilter;
+  if (!["current", "all", "none"].includes(f) && !tabTitles.has(Number(f)) && ![...store.values()].some((s) => String(s.tabId) === f)) {
     state.tabFilter = "current";
     applyFilters();
   }
+  updateTabButton();
+  if (!tabPop.hidden) renderTabOptions();
 }
+
+const tabTitleOf = (t, id) => (t && (t.title || t.url)) || `Tab #${id}`;
+
+// The options, in order: { group } headers and { value, title, closed, count, inGroup } rows.
+function tabItems() {
+  const counts = new Map();
+  for (const s of store.values()) counts.set(s.tabId, (counts.get(s.tabId) || 0) + 1);
+  const items = [];
+  const origin = state.originTabId;
+  const ot = origin != null ? tabTitles.get(origin) : null;
+  items.push({ value: "current", title: origin != null ? `Current tab: ${tabTitleOf(ot, origin)}` : "Current tab",
+    closed: false, count: origin != null ? counts.get(origin) || 0 : null });
+  items.push({ value: "all", title: "All tabs", count: store.size });
+
+  const byWindow = new Map(); // windowId -> tabs shown
+  const unknown = [];
+  for (const [id, t] of tabTitles) {
+    if (t.closed && !counts.get(id)) continue; // a closed tab with nothing left to show
+    if (t.windowId == null) { unknown.push(id); continue; }
+    if (!byWindow.has(t.windowId)) byWindow.set(t.windowId, []);
+    byWindow.get(t.windowId).push(id);
+  }
+  for (const id of counts.keys()) if (id >= 0 && !tabTitles.has(id)) unknown.push(id);
+
+  const order = (ids) => ids.sort((a, b) => {
+    const A = tabTitles.get(a), B = tabTitles.get(b);
+    return (A.index - B.index) || (a - b);
+  });
+  const addGroup = (label, note, ids) => {
+    if (!ids.length) return;
+    items.push({ group: label, note });
+    for (const id of ids) {
+      const t = tabTitles.get(id);
+      items.push({ value: String(id), title: tabTitleOf(t, id), url: t ? t.url : "", closed: !t || t.closed, count: counts.get(id) || 0, inGroup: true });
+    }
+  };
+
+  // The monitor's own window is left out unless other tabs share it.
+  const openWins = tabInfo.windows.filter((w) => w.id !== tabInfo.panelWindowId || byWindow.has(w.id)).sort((a, b) => a.id - b.id);
+  const multi = openWins.length > 1;
+  openWins.forEach((w, i) => {
+    const ids = order(byWindow.get(w.id) || []);
+    byWindow.delete(w.id);
+    const open = ids.filter((id) => !tabTitles.get(id).closed).length;
+    const notes = [`${open} tab${open === 1 ? "" : "s"}`];
+    if (w.incognito) notes.unshift("private");
+    if (origin != null && ids.includes(origin)) notes.push("current tab's window");
+    addGroup(multi ? `Window ${i + 1}` : "Window", notes.join(" · "), ids);
+  });
+  for (const [, ids] of byWindow) { // windows that have been closed
+    const priv = ids.some((id) => tabTitles.get(id).incognito);
+    addGroup("Closed window", priv ? "private" : "", order(ids));
+  }
+  if (unknown.length) addGroup("Closed tabs", "", unknown.sort((a, b) => a - b));
+
+  items.push({ group: "Other" });
+  items.push({ value: "none", title: "No tab (browser / extensions)", count: counts.get(-1) || 0, inGroup: true });
+  return items;
+}
+
+function updateTabButton() {
+  const item = tabItems().find((it) => it.value === state.tabFilter);
+  const label = tabSelect.querySelector(".select-label");
+  label.textContent = item ? item.title : "Current tab";
+  tabSelect.classList.toggle("tab-closed", !!(item && item.closed && item.inGroup));
+  tabSelect.title = (item ? item.title + (item.closed && item.inGroup ? " (closed)" : "") + "\n" : "") + "Show requests from one tab";
+}
+
+function renderTabOptions() {
+  const q = tabSearch.value.trim().toLowerCase();
+  let items = tabItems();
+  if (q) {
+    items = items.filter((it) => it.group || (it.title + " " + (it.url || "")).toLowerCase().includes(q));
+    items = items.filter((it, i) => !it.group || (items[i + 1] && !items[i + 1].group)); // drop empty groups
+  }
+  const values = items.filter((it) => !it.group).map((it) => it.value);
+  if (!values.includes(tabHighlight)) tabHighlight = values.includes(state.tabFilter) ? state.tabFilter : values[0] ?? null;
+
+  tabOptions.replaceChildren(...items.map((it) => {
+    if (it.group) return h("li", { class: "tab-group", role: "presentation" }, it.group, it.note ? h("span", { class: "tab-group-note" }, it.note) : null);
+    const li = h("li", {
+      class: "tab-opt" + (it.inGroup ? " in-group" : "") + (it.closed ? " tab-closed" : "") + (it.value === tabHighlight ? " hl" : ""),
+      role: "option", id: "tab-opt-" + it.value, "data-value": it.value,
+      "aria-selected": String(it.value === state.tabFilter),
+      title: it.closed && it.inGroup ? `${it.title} (closed)` : it.url || it.title,
+    }, h("span", { class: "tab-title" }, it.title), it.count != null ? h("span", { class: "tab-count" }, String(it.count)) : null);
+    return li;
+  }));
+  if (!values.length) tabOptions.append(h("li", { class: "tab-empty" }, "No tab matches."));
+  tabSearch.setAttribute("aria-activedescendant", tabHighlight != null ? "tab-opt-" + tabHighlight : "");
+}
+
+function highlightTab(value, scroll) {
+  tabHighlight = value;
+  for (const li of tabOptions.querySelectorAll(".tab-opt")) li.classList.toggle("hl", li.dataset.value === value);
+  tabSearch.setAttribute("aria-activedescendant", value != null ? "tab-opt-" + value : "");
+  if (scroll) { const li = tabOptions.querySelector(`.tab-opt[data-value="${CSS.escape(value)}"]`); if (li) li.scrollIntoView({ block: "nearest" }); }
+}
+
+function chooseTab(value) {
+  closeTabPop();
+  tabSelect.focus();
+  if (value == null || value === state.tabFilter) return;
+  state.tabFilter = value;
+  updateTabButton();
+  applyFilters();
+}
+
+function openTabPop() {
+  tabSearch.value = "";
+  tabHighlight = state.tabFilter;
+  renderTabOptions();
+  tabPop.hidden = false;
+  tabSelect.setAttribute("aria-expanded", "true");
+  const r = tabSelect.getBoundingClientRect();
+  tabPop.style.left = Math.max(8, Math.min(r.right - tabPop.offsetWidth, window.innerWidth - tabPop.offsetWidth - 8)) + "px";
+  tabPop.style.top = r.bottom + 4 + "px";
+  tabSearch.focus();
+  highlightTab(tabHighlight, true);
+  refreshTabs(); // pick up anything that changed since the last refresh
+}
+function closeTabPop() {
+  tabPop.hidden = true;
+  tabSelect.setAttribute("aria-expanded", "false");
+}
+
+tabSelect.addEventListener("click", () => (tabPop.hidden ? openTabPop() : closeTabPop()));
+tabSelect.addEventListener("keydown", (ev) => {
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); ev.stopPropagation(); if (tabPop.hidden) openTabPop(); }
+});
+document.addEventListener("mousedown", (ev) => {
+  if (!tabPop.hidden && !tabPop.contains(ev.target) && !tabSelect.contains(ev.target)) closeTabPop();
+});
+tabSearch.addEventListener("input", () => { tabHighlight = null; renderTabOptions(); highlightTab(tabHighlight, true); });
+tabPop.addEventListener("keydown", (ev) => {
+  const values = [...tabOptions.querySelectorAll(".tab-opt")].map((li) => li.dataset.value);
+  const i = values.indexOf(tabHighlight);
+  const move = (to) => { ev.preventDefault(); if (values.length) highlightTab(values[Math.max(0, Math.min(values.length - 1, to))], true); };
+  switch (ev.key) {
+    case "ArrowDown": move(i + 1); break;
+    case "ArrowUp": move(i - 1); break;
+    case "PageDown": move(i + 10); break;
+    case "PageUp": move(i - 10); break;
+    case "Home": if (!tabSearch.value) move(0); break;
+    case "End": if (!tabSearch.value) move(values.length - 1); break;
+    case "Enter": ev.preventDefault(); chooseTab(tabHighlight); break;
+    case "Escape": ev.preventDefault(); ev.stopPropagation(); closeTabPop(); tabSelect.focus(); break;
+    case "Tab": closeTabPop(); break;
+  }
+});
+tabOptions.addEventListener("mousemove", (ev) => {
+  const li = ev.target.closest(".tab-opt");
+  if (li && li.dataset.value !== tabHighlight) highlightTab(li.dataset.value, false);
+});
+tabOptions.addEventListener("click", (ev) => {
+  const li = ev.target.closest(".tab-opt");
+  if (li) chooseTab(li.dataset.value);
+});
 
 let tabTimer = null;
 function scheduleTabRefresh() {
-  if (document.activeElement === tabSelect) return; // don't close an open dropdown
   clearTimeout(tabTimer);
   tabTimer = setTimeout(refreshTabs, 300);
 }
 browser.tabs.onCreated.addListener(scheduleTabRefresh);
 browser.tabs.onRemoved.addListener(scheduleTabRefresh);
+browser.tabs.onAttached.addListener(scheduleTabRefresh);
+browser.tabs.onMoved.addListener(scheduleTabRefresh);
+browser.windows.onCreated.addListener(scheduleTabRefresh);
+browser.windows.onRemoved.addListener(scheduleTabRefresh);
 browser.tabs.onUpdated.addListener((id, info) => { if (info.title || info.url) scheduleTabRefresh(); });
 
 

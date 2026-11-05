@@ -3,6 +3,7 @@
 #   always-on-netmon.xpi         Firefox (Manifest V2, manifest.json)
 #   dist/chrome/                 Chrome, unpacked (Manifest V3, manifest.chrome.json)
 #   always-on-netmon-chrome.zip  Chrome, the same as a zip
+# With --install, also updates the add-on in the running Firefox (see the end).
 set -e
 cd "$(dirname "$0")"
 
@@ -24,3 +25,17 @@ cp icons/icon-16.png icons/icon-32.png icons/icon-48.png icons/icon-128.png dist
 cp manifest.chrome.json dist/chrome/manifest.json
 (cd dist/chrome && zip -q -r -X ../../always-on-netmon-chrome.zip .)
 echo "Built $(pwd)/dist/chrome (load unpacked) and $(pwd)/always-on-netmon-chrome.zip"
+
+# ./build.sh --install: hand the new .xpi to the running Firefox, which updates
+# the installed add-on in place (settings kept). Set FIREFOX to pick the binary.
+if [ "$1" = "--install" ]; then
+  FF="${FIREFOX:-}"
+  if [ -z "$FF" ]; then
+    for c in firefox-developer-edition /opt/firefox-dev/firefox firefox-nightly firefox; do
+      if command -v "$c" >/dev/null 2>&1; then FF="$c"; break; fi
+    done
+  fi
+  [ -n "$FF" ] || { echo "No Firefox found; set FIREFOX=/path/to/firefox." >&2; exit 1; }
+  "$FF" "$(pwd)/always-on-netmon.xpi" >/dev/null 2>&1 &
+  echo "Sent the .xpi to $FF (confirm the prompt if Firefox shows one)."
+fi

@@ -55,13 +55,18 @@
       <button data-type="other">Other</button>
     </div>
     <span class="spacer"></span>
-    <select id="tab-filter" title="Show requests from one tab"></select>
+    <button id="tab-filter" class="select-btn" aria-haspopup="listbox" aria-expanded="false" title="Show requests from one tab"><span class="select-label">Current tab</span></button>
     <label class="check" title="Capture response bodies for new requests">
       <input type="checkbox" id="opt-bodies"> Capture bodies
     </label>
     <button id="btn-har" class="icon-btn" title="Save the requests shown as a HAR file" aria-label="Save as HAR">
       <svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
+  </div>
+
+  <div id="tab-pop" hidden>
+    <input id="tab-search" type="search" spellcheck="false" placeholder="Find a tab" aria-label="Find a tab" aria-controls="tab-options">
+    <ul id="tab-options" role="listbox" aria-label="Tabs"></ul>
   </div>
 
   <div id="rules-pop" role="dialog" aria-label="Filter rules" hidden>

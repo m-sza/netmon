@@ -4,7 +4,7 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 
 ## Features
 
-- Records every tab continuously; view one tab, the current tab or all tabs
+- Records every tab continuously; view one tab, the current tab or all tabs, with tabs grouped by window and closed tabs kept under their last title
 - Request/response headers, bodies (collapsible JSON tree, syntax highlighting), cookies, timings
 - TLS / security details per request
 - WebSocket traffic, including sending and editing-and-resending messages; HAR export includes WebSocket frames
@@ -26,6 +26,8 @@ Produces:
 
 - `always-on-netmon.xpi` — Firefox (Manifest V2)
 - `dist/chrome/` and `always-on-netmon-chrome.zip` — Chrome (Manifest V3)
+
+`./build.sh --install` also hands the new `.xpi` to your running Firefox, which updates the installed add-on in place (set `FIREFOX=/path/to/firefox` if it picks the wrong one).
 
 ## Install
 

@@ -1324,6 +1324,61 @@ function clearAll() {
   broadcast({ type: "cleared" });
 }
 
+/* ---------------------------------------------------------------------------
+ * Tab memory: the last title, URL and window of every tab, kept after the tab
+ * closes, so the panel can name closed tabs and group tabs by window.
+ * ------------------------------------------------------------------------- */
+const tabMeta = new Map(); // tabId -> { title, url, windowId, index, incognito, closed, closedAt }
+const MAX_CLOSED_TABS = 500;
+
+function noteTab(t) {
+  if (!t || t.id == null || t.id < 0 || (t.url || "").startsWith(OWN_ORIGIN)) return;
+  const old = tabMeta.get(t.id) || {};
+  tabMeta.set(t.id, {
+    title: t.title || old.title || "",
+    url: t.url || old.url || "",
+    windowId: t.windowId ?? old.windowId,
+    index: t.index ?? old.index ?? 0,
+    incognito: !!t.incognito,
+    closed: false,
+  });
+}
+browser.tabs.query({}).then((tabs) => tabs.forEach(noteTab), () => {});
+browser.tabs.onCreated.addListener(noteTab);
+browser.tabs.onUpdated.addListener((id, info, tab) => noteTab(tab));
+browser.tabs.onAttached.addListener((id, info) => {
+  const m = tabMeta.get(id);
+  if (m) { m.windowId = info.newWindowId; m.index = info.newPosition; }
+});
+browser.tabs.onMoved.addListener((id, info) => { const m = tabMeta.get(id); if (m) m.index = info.toIndex; });
+browser.tabs.onReplaced.addListener((added, removed) => {
+  const m = tabMeta.get(removed);
+  if (m) { tabMeta.delete(removed); tabMeta.set(added, m); }
+});
+browser.tabs.onRemoved.addListener((id) => {
+  const m = tabMeta.get(id);
+  if (!m) return;
+  m.closed = true;
+  m.closedAt = Date.now();
+  const closed = [...tabMeta].filter(([, v]) => v.closed);
+  if (closed.length > MAX_CLOSED_TABS) {
+    closed.sort((a, b) => a[1].closedAt - b[1].closedAt);
+    for (const [k] of closed.slice(0, closed.length - MAX_CLOSED_TABS)) tabMeta.delete(k);
+  }
+});
+
+async function tabList() {
+  const [tabs, wins] = await Promise.all([browser.tabs.query({}), browser.windows.getAll({})]);
+  for (const t of tabs) noteTab(t); // fills in anything an event missed
+  const open = new Set(tabs.map((t) => t.id));
+  for (const [id, m] of tabMeta) if (!m.closed && !open.has(id)) { m.closed = true; m.closedAt = Date.now(); }
+  return {
+    tabs: [...tabMeta].map(([id, m]) => ({ id, ...m })),
+    windows: wins.map((w) => ({ id: w.id, focused: !!w.focused, incognito: !!w.incognito, type: w.type })),
+    panelWindowId: (tabs.find((t) => t.id === panelTabId) || {}).windowId ?? null,
+  };
+}
+
 browser.runtime.onConnect.addListener((port) => {
   if (port.name !== "panel") return;
   ports.add(port);
@@ -1341,6 +1396,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   // Everything else comes from the panel, never from content scripts.
   if (!(sender.url || "").startsWith(OWN_ORIGIN)) return undefined;
   switch (msg && msg.cmd) {
+    case "tabList":
+      return tabList();
     case "previewResources":
       return Promise.resolve(previewResources(msg.urls, msg.tabId));
     case "getWsMessages":
