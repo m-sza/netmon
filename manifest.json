@@ -1,0 +1,58 @@
+{
+  "manifest_version": 2,
+  "name": "Always-On Network Monitor",
+  "version": "1.1.0",
+  "description": "Records network traffic in the background, all the time, and shows it in a DevTools-style network panel.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "always-on-netmon@local",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>",
+    "storage",
+    "tabs",
+    "downloads",
+    "clipboardWrite",
+    "scripting",
+    "management"
+  ],
+  "background": {
+    "scripts": [
+      "compat.js",
+      "common.js",
+      "background.js"
+    ],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "compat.js",
+        "ws-relay.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "browser_action": {
+    "default_title": "Network Monitor",
+    "default_icon": "icons/icon.svg"
+  },
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
+  }
+}

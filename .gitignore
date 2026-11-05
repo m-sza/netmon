@@ -1,0 +1,4 @@
+# Build outputs (made by ./build.sh)
+*.xpi
+*.zip
+dist/

@@ -1,0 +1,18 @@
+/* Always-On Network Monitor: hides the tab strip, toolbar, bookmarks and
+ * sidebar in the monitor's own window only. The extension marks that window
+ * with an invisible title preface (U+2063 U+2063).
+ *
+ * Needs toolkit.legacyUserProfileCustomizations.stylesheets = true and this
+ * file's contents in <profile>/chrome/userChrome.css. Restart Firefox after. */
+#main-window[titlepreface^="\2063\2063"] #nav-bar,
+#main-window[titlepreface^="\2063\2063"] #PersonalToolbar,
+#main-window[titlepreface^="\2063\2063"] #sidebar-main,
+#main-window[titlepreface^="\2063\2063"] #sidebar-box,
+#main-window[titlepreface^="\2063\2063"] #sidebar-splitter {
+  visibility: collapse !important;
+}
+/* Keep the tab strip's row so the window can still be dragged and closed,
+ * but hide the tabs themselves. */
+#main-window[titlepreface^="\2063\2063"] #TabsToolbar .toolbar-items {
+  visibility: hidden !important;
+}
