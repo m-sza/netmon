@@ -50,6 +50,8 @@
   --header-h: 28px;           /* table header and details tab bar */
   --radius: 4px;
   --radius-lg: 8px;           /* popovers, menus, dialogs */
+  --menu-pad: 4px;            /* inside menus and listbox popovers */
+  --item-pad-x: 10px;         /* menu and listbox items */
   --border-strong: #c4c4cc;   /* control borders on hover */
   --on-accent: #ffffff;       /* text on accent-filled controls */
   --ring: 0 0 0 2px rgb(0 97 224 / 30%);
@@ -237,8 +239,8 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 #tab-pop {
   position: fixed; z-index: 20;
   width: min(440px, calc(100vw - 16px)); max-height: min(70vh, 600px);
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 6px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: var(--menu-pad);
   background: var(--menu-bg); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius-lg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
@@ -247,16 +249,17 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 #tab-options { list-style: none; margin: 0; padding: 0; overflow: auto; min-height: 0; }
 #tab-options .tab-group {
   display: flex; gap: 6px; align-items: baseline;
-  padding: 8px 8px 3px; color: var(--muted); font-size: 11px; font-weight: 600;
+  padding: 8px var(--item-pad-x) 3px; color: var(--muted); font-size: 11px; font-weight: 600;
   position: sticky; top: 0; background: var(--menu-bg);
 }
 #tab-options .tab-group:first-child { padding-top: 2px; }
 #tab-options .tab-group .tab-group-note { font-weight: normal; }
 #tab-options .tab-opt {
   display: flex; align-items: center; gap: 8px;
-  padding: 3px 8px; border-radius: var(--radius); cursor: default;
+  box-sizing: border-box; height: var(--control-h);
+  padding: 0 var(--item-pad-x); border-radius: var(--radius); cursor: default;
 }
-#tab-options .tab-opt.in-group { padding-left: 16px; }
+#tab-options .tab-opt.in-group { padding-left: calc(var(--item-pad-x) + 8px); }
 #tab-options .tab-opt.hl { background: var(--menu-hover); }
 #tab-options .tab-opt[aria-selected=true] { color: var(--accent); font-weight: 600; }
 .tab-icon { flex: none; display: inline-flex; width: 16px; height: 16px; }
@@ -266,7 +269,7 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 .tab-opt .tab-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab-opt .tab-count { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; font-weight: normal; }
 .tab-closed .tab-title, .select-btn.tab-closed .select-label { text-decoration: line-through; color: var(--muted); }
-#tab-options .tab-empty { padding: 6px 8px; color: var(--muted); }
+#tab-options .tab-empty { padding: 4px var(--item-pad-x); color: var(--muted); }
 #btn-har svg { fill: none; }
 
 /* ---------------- Layout ---------------- */
@@ -440,16 +443,6 @@ body.has-details .c-waterfall { display: none; }
 .tree-btns { display: inline-flex; gap: 6px; }
 .tree-btns[hidden] { display: none; }
 
-.summary {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  column-gap: 14px;
-  row-gap: 3px;
-  margin-bottom: 10px;
-}
-.summary .k { color: var(--muted); }
-.summary .v { word-break: break-word; }
-.summary .v .mono { word-break: break-all; }
 
 .status-chip.st-ok { color: var(--ok); }
 .status-chip.st-bad, .status-chip.st-error { color: var(--bad); }
@@ -458,17 +451,19 @@ details.section { border-top: 1px solid var(--border-faint); padding: 4px 0; }
 details.section > summary { cursor: pointer; font-weight: 600; padding: 3px 0; user-select: none; }
 details.section > summary .count { color: var(--muted); font-weight: normal; }
 
-table.kv { width: 100%; border-collapse: collapse; margin: 2px 0 4px; }
-table.kv td {
-  padding: 2px 6px 2px 0;
-  vertical-align: top;
-  word-break: break-word;
+/* Key/value lists (summary, headers, cookies, parameters, timings, security):
+   one look everywhere. Rows hover like the request list, and the hover band
+   reaches past the text so the text lines up with the section titles. */
+table.kv {
+  width: calc(100% + 12px); margin: 2px -6px 6px;
+  border-collapse: collapse; table-layout: fixed;
 }
+table.kv td { padding: 2px 6px; vertical-align: top; word-break: break-word; }
+table.kv td.k { width: 28%; color: var(--muted); }
+table.kv tr:hover { background: var(--hover); }
 /* Names and values as sent (headers, cookies, parameters) */
 table.kv.data td { font-family: var(--mono); word-break: break-all; }
 table.kv td .mono { word-break: break-all; }
-table.kv td.k { width: 32%; color: var(--muted); }
-table.kv.wide td.k { width: 22%; }
 
 pre.code, .jtree {
   margin: 4px 0;
@@ -573,7 +568,7 @@ pre.code, .jtree {
 }
 .ws-table { width: 100%; border-collapse: collapse; table-layout: fixed; font: 12px/1.45 var(--mono); }
 .ws-table td {
-  padding: 1px 6px; height: 20px;
+  padding: 0 6px; height: 22px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   border-bottom: 1px solid var(--border-faint);
 }
@@ -649,7 +644,7 @@ pre.code, .jtree {
   min-width: 230px;
   max-height: calc(100vh - 8px);
   overflow: auto;
-  padding: 4px 0;
+  padding: var(--menu-pad);
   background: var(--menu-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -663,14 +658,15 @@ pre.code, .jtree {
   background: none;
   text-align: left;
   height: var(--control-h);
-  padding: 0 24px;
+  padding: 0 var(--item-pad-x);
+  border-radius: var(--radius);
   cursor: default;
   white-space: nowrap;
 }
 #ctx-menu .item:hover:not(:disabled),
 #ctx-menu .item:focus { background: var(--menu-hover); outline: none; }
 #ctx-menu .item:disabled { color: var(--muted); opacity: 0.6; }
-#ctx-menu .sep { height: 1px; margin: 4px 0; background: var(--border); }
+#ctx-menu .sep { height: 1px; margin: 4px var(--item-pad-x); background: var(--border); }
 
 /* ---------------- Toast ---------------- */
 #toast {

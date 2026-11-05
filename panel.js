@@ -1361,34 +1361,41 @@ function note(text, cls) {
   return h("div", { class: "note" + (cls ? " " + cls : "") }, text);
 }
 
-// Label/value facts. With data ("header", "cookie" or "param"): names and
-// values as sent, in monospace, with a right-click menu to copy them.
-const kvRows = new WeakMap(); // data row -> { kind, name, value }
-function kvTable(pairs, wide, data) {
-  return h("table", { class: "kv" + (wide ? " wide" : "") + (data ? " data" : "") },
+/* The one key/value list used everywhere (summary, headers, cookies,
+ * parameters, timings, security, font info). data ("header", "cookie" or
+ * "param") marks names and values as sent: monospace, and copyable by name.
+ * Every row has the same right-click menu. */
+const kvRows = new WeakMap(); // row -> { kind, name, value }
+const textOf = (v) => (v == null ? "" : v instanceof Node ? v.textContent : String(v));
+function kvTable(pairs, data) {
+  return h("table", { class: "kv" + (data ? " data" : "") },
     h("tbody", null, pairs.map(([k, v]) => {
       const tr = h("tr", null, h("td", { class: "k" }, k), h("td", null, v));
-      if (data) kvRows.set(tr, { kind: data, name: String(k), value: String(v) });
+      kvRows.set(tr, { kind: data || "fact", name: textOf(k), value: textOf(v) });
       return tr;
     })));
 }
 
 detailsBody.addEventListener("contextmenu", (ev) => {
-  const tr = ev.target.closest("table.kv.data tr");
+  const tr = ev.target.closest("table.kv tr");
   const row = tr && kvRows.get(tr);
   if (!row) return;
   ev.preventDefault();
-  const sel = String(window.getSelection() || "");
   const { kind, name, value } = row;
+  if (kind === "fact") {
+    openMenu(ev.clientX, ev.clientY, [
+      { label: "Copy Value", run: () => copy(value, "Value copied") },
+      { label: "Copy Row", run: () => copy(`${name}: ${value}`, "Row copied") },
+    ], ev.target);
+    return;
+  }
   const Noun = { header: "Header", cookie: "Cookie", param: "Parameter" }[kind];
   openMenu(ev.clientX, ev.clientY, [
-    sel && { label: "Copy Selection", run: () => copy(sel, "Selection copied") },
-    sel && "-",
     { label: "Copy Name", run: () => copy(name, "Name copied") },
     { label: "Copy Value", run: () => copy(value, "Value copied") },
     { label: `Copy ${Noun}`, run: () => copy(kind === "header" ? `${name}: ${value}` : `${name}=${value}`, `${Noun} copied`) },
     row.setCookie && { label: "Copy Set-Cookie Value", run: () => copy(row.setCookie, "Set-Cookie value copied") },
-  ]);
+  ], ev.target);
 });
 
 function section(title, count, ...content) {
@@ -1437,8 +1444,7 @@ function renderHeaders(d) {
     ["Third party", d.thirdParty ? "Yes" : "No"],
   ].filter(Boolean);
 
-  const summary = h("div", { class: "summary" },
-    pairs.flatMap(([k, v]) => [h("div", { class: "k" }, k), h("div", { class: "v" }, v)]));
+  const summary = kvTable(pairs);
 
   const copyUrlBtn = h("button", { class: "text-btn", onclick: (e) => copyText(d.url, e.currentTarget) }, "Copy URL");
   const curlBtn = h("button", { class: "text-btn", onclick: (e) => copyText(curlCommand(d, false), e.currentTarget) }, "Copy as cURL");
@@ -1465,7 +1471,7 @@ function headerSection(title, list, firstLine, pending) {
     const raw = [firstLine, ...list.map((x) => `${x.name}: ${x.value}`)].filter(Boolean).join("\n");
     return section(title, list.length, h("pre", { class: "code" }, raw));
   }
-  return section(title, list.length, kvTable(list.map((x) => [x.name, x.value]), false, "header"));
+  return section(title, list.length, kvTable(list.map((x) => [x.name, x.value]), "header"));
 }
 
 /* Cookies tab */
@@ -1482,7 +1488,7 @@ function renderCookies(d) {
         })))
       : note("No cookies set by this response.")));
   out.push(section("Request cookies", reqCookies.length,
-    reqCookies.length ? kvTable(reqCookies.map((c) => [c.name, c.value]), false, "cookie") : note("No cookies sent with this request.")));
+    reqCookies.length ? kvTable(reqCookies.map((c) => [c.name, c.value]), "cookie") : note("No cookies sent with this request.")));
   return out;
 }
 
@@ -1491,7 +1497,7 @@ function renderRequest(d) {
   const out = [];
   const u = safeUrl(d.url);
   const params = u ? [...u.searchParams] : [];
-  if (params.length) out.push(section("Query string", params.length, kvTable(params, false, "param")));
+  if (params.length) out.push(section("Query string", params.length, kvTable(params, "param")));
 
   const rb = d.requestBody;
   if (!rb) {
@@ -1500,7 +1506,7 @@ function renderRequest(d) {
     out.push(note(`${BROWSER} couldn't read the request body: ${rb.error}`, "warn"));
   } else if (rb.formData) {
     const pairs = Object.entries(rb.formData).flatMap(([k, vs]) => vs.map((v) => [k, v]));
-    out.push(section("Form data", pairs.length, kvTable(pairs, false, "param")));
+    out.push(section("Form data", pairs.length, kvTable(pairs, "param")));
   } else if (rb.raw) {
     const ct = parseContentType(header(d.requestHeaders, "content-type"));
     const content = [bodyView(rb.raw, ct.mime, ct.charset, d.url)];
@@ -1674,7 +1680,7 @@ function fontPreview(buf, mime) {
       ["Glyphs", fi.glyphs != null ? fi.glyphs.toLocaleString() : null],
       ["Size", fmtBytes(buf.byteLength)],
     ].filter(([, v]) => v);
-    meta.replaceChildren(kvTable(rows, true));
+    meta.replaceChildren(kvTable(rows));
   });
 
   return h("div", { class: "font-preview" }, meta, h("div", { class: "actions" }, input), status, sample);
@@ -1767,11 +1773,8 @@ function jsonMenu(ev, tree) {
   const e = tree.entryAt(ev.target);
   if (!e) return;
   ev.preventDefault();
-  const sel = String(window.getSelection() || "");
   const what = e.kind === "value" ? "Value" : e.kind === "object" ? "Object" : "Array";
   openMenu(ev.clientX, ev.clientY, [
-    sel && { label: "Copy Selection", run: () => copy(sel, "Selection copied") },
-    sel && "-",
     e.index != null
       ? { label: `Copy Index (${e.index})`, run: () => copy(String(e.index), "Index copied") }
       : { label: "Copy Key", disabled: e.key == null, run: () => copy(e.key, "Key copied") },
@@ -1780,7 +1783,7 @@ function jsonMenu(ev, tree) {
     "-",
     { label: "Copy Path (JavaScript)", disabled: !e.path, run: () => copy(e.path, "Path copied") },
     { label: "Copy Path (Python)", disabled: !e.pythonPath, run: () => copy(e.pythonPath, "Path copied") },
-  ]);
+  ], ev.target);
 }
 
 /* Timings tab */
@@ -1816,7 +1819,7 @@ function renderTimings(d) {
       t.headersReceived && ["Headers received", fmtClock(t.headersReceived)],
       t.responseStarted && ["First byte", fmtClock(t.responseStarted)],
       d.end && ["Finished", fmtClock(d.end)],
-    ].filter(Boolean), true),
+    ].filter(Boolean)),
     note(`${BROWSER}'s extension API doesn't expose DNS, connect or TLS timings, so they're included in “Waiting for response”.`),
   ];
 }
@@ -1975,11 +1978,11 @@ function createWsView(id) {
     const m = v.msgs[Number(tr.dataset.i)];
     const has = m.data != null;
     openMenu(ev.clientX, ev.clientY, [
+      { label: m.op === 2 ? "Copy Message (base64)" : "Copy Message", disabled: !has, run: () => copy(m.data, "Message copied") },
+      "-",
       { label: "Resend", disabled: !has || !v.canSend, run: () => resendWsMessage(v, m) },
       { label: "Edit and Resend…", disabled: !has || !v.canSend, run: () => v.composer.open(m) },
-      "-",
-      { label: m.op === 2 ? "Copy Message (base64)" : "Copy Message", disabled: !has, run: () => copy(m.data, "Message copied") },
-    ]);
+    ], ev.target);
   });
   return v;
 }
@@ -2111,7 +2114,7 @@ function renderSecurity(d) {
     ["Extended Validation", yn(s.isExtendedValidation)],
     ["Weaknesses", s.weaknessReasons && s.weaknessReasons.join(", ")],
     ["Error category", s.overridableErrorCategory],
-  ]), true)));
+  ]))));
 
   const certs = s.certificates || [];
   certs.forEach((c, i) => {
@@ -2129,7 +2132,7 @@ function renderSecurity(d) {
       ["Public key SHA-256", mono(c.subjectPublicKeyInfoDigest && c.subjectPublicKeyInfoDigest.sha256)],
       ["Alternative names", mono(c.sanList && c.sanList.join(", "))],
       ["Built-in root", c.isBuiltInRoot ? "Yes" : null],
-    ]), true)));
+    ]))));
   });
 
   out.push(note(`${BROWSER} doesn't give extensions the raw TLS handshake, so JA3/JA4 fingerprints can't be shown here.`));

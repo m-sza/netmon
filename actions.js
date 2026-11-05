@@ -412,7 +412,14 @@ function cleanItems(items) {
   return out;
 }
 
-function openMenu(x, y, items) {
+/* Every menu is built here. target: the element right-clicked; when it is
+ * inside selected text, "Copy Selection" comes first, in every menu. */
+function openMenu(x, y, items, target) {
+  const sel = window.getSelection();
+  const selText = sel && !sel.isCollapsed ? String(sel) : "";
+  if (selText.trim() && target && sel.containsNode(target, true)) {
+    items = [{ label: "Copy Selection", run: () => copy(selText, "Selection copied") }, "-", ...items];
+  }
   menuEl.replaceChildren();
   for (const it of cleanItems(items)) {
     if (it === "-") { menuEl.append(h("div", { class: "sep", role: "separator" })); continue; }
@@ -461,10 +468,10 @@ function requestMenuItems(d) {
     { label: "Copy Response Headers", disabled: !d.responseHeaders.length, run: () => copy(rawResponseHeaders(d), "Response headers copied") },
     { label: "Copy Response", disabled: !hasResponse, run: () => copy(responseAsText(d), "Response copied") },
     { label: "Copy as HAR", run: () => copyHar([d.id]) },
-    { label: "Copy All As HAR", run: () => copyHar(visibleIds()) },
+    { label: "Copy All as HAR", run: () => copyHar(visibleIds()) },
     "-",
-    { label: "Save Response As…", disabled: !hasResponse, run: () => saveResponse(d) },
-    { label: "Save All As HAR", run: () => saveHar(visibleIds()) },
+    { label: "Save Response as…", disabled: !hasResponse, run: () => saveResponse(d) },
+    { label: "Save All as HAR", run: () => saveHar(visibleIds()) },
     "-",
     { label: "Resend", disabled: !isHttp, run: async () => { await send({ cmd: "resend", id: d.id }); toast("Request resent"); } },
     { label: "Edit and Resend…", disabled: !isHttp, run: () => openResendDialog(d) },
@@ -482,8 +489,8 @@ function requestMenuItems(d) {
 function listMenuItems() {
   const any = visibleIds().length > 0;
   return [
-    { label: "Copy All As HAR", disabled: !any, run: () => copyHar(visibleIds()) },
-    { label: "Save All As HAR", disabled: !any, run: () => saveHar(visibleIds()) },
+    { label: "Copy All as HAR", disabled: !any, run: () => copyHar(visibleIds()) },
+    { label: "Save All as HAR", disabled: !any, run: () => saveHar(visibleIds()) },
     "-",
     state.blocked.size
       ? { label: `Unblock All URLs (${state.blocked.size})`, run: async () => { await send({ cmd: "unblockAll" }); toast("All URLs unblocked"); } }
@@ -497,11 +504,11 @@ listPane.addEventListener("contextmenu", async (ev) => {
   const x = ev.clientX;
   const y = ev.clientY;
   const tr = ev.target.closest("#rows tr[data-id]");
-  if (!tr) { openMenu(x, y, listMenuItems()); return; }
+  if (!tr) { openMenu(x, y, listMenuItems(), ev.target); return; }
   const id = Number(tr.dataset.id);
   if (state.selectedId !== id) select(id);
   const d = await send({ cmd: "getDetails", id });
-  openMenu(x, y, d ? requestMenuItems(d) : listMenuItems());
+  openMenu(x, y, d ? requestMenuItems(d) : listMenuItems(), ev.target);
 });
 
 // Menu keyboard handling runs before the panel's own shortcuts.
