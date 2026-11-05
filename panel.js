@@ -1337,11 +1337,35 @@ function note(text, cls) {
   return h("div", { class: "note" + (cls ? " " + cls : "") }, text);
 }
 
-// Label/value facts. With data: true, names and values as sent (monospace).
+// Label/value facts. With data ("header", "cookie" or "param"): names and
+// values as sent, in monospace, with a right-click menu to copy them.
+const kvRows = new WeakMap(); // data row -> { kind, name, value }
 function kvTable(pairs, wide, data) {
   return h("table", { class: "kv" + (wide ? " wide" : "") + (data ? " data" : "") },
-    h("tbody", null, pairs.map(([k, v]) => h("tr", null, h("td", { class: "k" }, k), h("td", null, v)))));
+    h("tbody", null, pairs.map(([k, v]) => {
+      const tr = h("tr", null, h("td", { class: "k" }, k), h("td", null, v));
+      if (data) kvRows.set(tr, { kind: data, name: String(k), value: String(v) });
+      return tr;
+    })));
 }
+
+detailsBody.addEventListener("contextmenu", (ev) => {
+  const tr = ev.target.closest("table.kv.data tr");
+  const row = tr && kvRows.get(tr);
+  if (!row) return;
+  ev.preventDefault();
+  const sel = String(window.getSelection() || "");
+  const { kind, name, value } = row;
+  const Noun = { header: "Header", cookie: "Cookie", param: "Parameter" }[kind];
+  openMenu(ev.clientX, ev.clientY, [
+    sel && { label: "Copy Selection", run: () => copy(sel, "Selection copied") },
+    sel && "-",
+    { label: "Copy Name", run: () => copy(name, "Name copied") },
+    { label: "Copy Value", run: () => copy(value, "Value copied") },
+    { label: `Copy ${Noun}`, run: () => copy(kind === "header" ? `${name}: ${value}` : `${name}=${value}`, `${Noun} copied`) },
+    row.setCookie && { label: "Copy Set-Cookie Value", run: () => copy(row.setCookie, "Set-Cookie value copied") },
+  ]);
+});
 
 function section(title, count, ...content) {
   return h("details", { class: "section", open: true },
@@ -1417,7 +1441,7 @@ function headerSection(title, list, firstLine, pending) {
     const raw = [firstLine, ...list.map((x) => `${x.name}: ${x.value}`)].filter(Boolean).join("\n");
     return section(title, list.length, h("pre", { class: "code" }, raw));
   }
-  return section(title, list.length, kvTable(list.map((x) => [x.name, x.value]), false, true));
+  return section(title, list.length, kvTable(list.map((x) => [x.name, x.value]), false, "header"));
 }
 
 /* Cookies tab */
@@ -1427,11 +1451,14 @@ function renderCookies(d) {
   const out = [];
   out.push(section("Response cookies", resCookies.length,
     resCookies.length
-      ? h("table", { class: "kv data" }, h("tbody", null, resCookies.map((c) =>
-          h("tr", null, h("td", { class: "k" }, c.name), h("td", null, c.value, c.attrs.length ? h("div", { class: "note" }, c.attrs.join("; ")) : null)))))
+      ? h("table", { class: "kv data" }, h("tbody", null, resCookies.map((c) => {
+          const tr = h("tr", null, h("td", { class: "k" }, c.name), h("td", null, c.value, c.attrs.length ? h("div", { class: "note" }, c.attrs.join("; ")) : null));
+          kvRows.set(tr, { kind: "cookie", name: c.name, value: c.value, setCookie: c.attrs.length ? [`${c.name}=${c.value}`, ...c.attrs].join("; ") : null });
+          return tr;
+        })))
       : note("No cookies set by this response.")));
   out.push(section("Request cookies", reqCookies.length,
-    reqCookies.length ? kvTable(reqCookies.map((c) => [c.name, c.value]), false, true) : note("No cookies sent with this request.")));
+    reqCookies.length ? kvTable(reqCookies.map((c) => [c.name, c.value]), false, "cookie") : note("No cookies sent with this request.")));
   return out;
 }
 
@@ -1440,7 +1467,7 @@ function renderRequest(d) {
   const out = [];
   const u = safeUrl(d.url);
   const params = u ? [...u.searchParams] : [];
-  if (params.length) out.push(section("Query string", params.length, kvTable(params, false, true)));
+  if (params.length) out.push(section("Query string", params.length, kvTable(params, false, "param")));
 
   const rb = d.requestBody;
   if (!rb) {
@@ -1449,7 +1476,7 @@ function renderRequest(d) {
     out.push(note(`${BROWSER} couldn't read the request body: ${rb.error}`, "warn"));
   } else if (rb.formData) {
     const pairs = Object.entries(rb.formData).flatMap(([k, vs]) => vs.map((v) => [k, v]));
-    out.push(section("Form data", pairs.length, kvTable(pairs, false, true)));
+    out.push(section("Form data", pairs.length, kvTable(pairs, false, "param")));
   } else if (rb.raw) {
     const ct = parseContentType(header(d.requestHeaders, "content-type"));
     const content = [bodyView(rb.raw, ct.mime, ct.charset, d.url)];
@@ -1727,7 +1754,8 @@ function jsonMenu(ev, tree) {
     { label: `Copy ${what}`, run: () => copy(e.value(), `${what} copied`) },
     { label: e.parentKind === "array" ? "Copy Parent Array" : "Copy Parent Object", disabled: !e.parent, run: () => copy(e.parent(), `Parent ${e.parentKind || "object"} copied`) },
     "-",
-    { label: "Copy Path", disabled: !e.path, run: () => copy(e.path, "Path copied") },
+    { label: "Copy Path (JavaScript)", disabled: !e.path, run: () => copy(e.path, "Path copied") },
+    { label: "Copy Path (Python)", disabled: !e.pythonPath, run: () => copy(e.pythonPath, "Path copied") },
   ]);
 }
 

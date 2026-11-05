@@ -146,11 +146,16 @@ const JsonTree = (() => {
   // A primitive as plain text: strings without quotes and escapes.
   const plain = (node) => (node.t === "str" ? JSON.parse(node.raw) : node.t === "num" || node.t === "lit" ? node.raw : serialize(node));
   const IDENT = /^[A-Za-z_$][\w$]*$/;
-  function path(ctx) {
+  // JavaScript: user.tags[0], a["odd key"]. Python: ["user"]["tags"][0], for
+  // indexing what json.loads() returns (JSON string escapes are valid Python).
+  function path(ctx, python) {
     let out = "";
     for (let c = ctx; c && c.parent; c = c.parent) {
       if (c.key == null) out = `[${c.index}]` + out;
-      else { const k = JSON.parse(c.key); out = (IDENT.test(k) ? "." + k : `[${JSON.stringify(k)}]`) + out; }
+      else {
+        const k = JSON.parse(c.key);
+        out = (!python && IDENT.test(k) ? "." + k : `[${JSON.stringify(k)}]`) + out;
+      }
     }
     return out.startsWith(".") ? out.slice(1) : out;
   }
@@ -175,6 +180,7 @@ const JsonTree = (() => {
       parent: ctx.parent ? () => serialize(ctx.parent.node) : null,
       parentKind: ctx.parent ? (ctx.parent.node.t === "obj" ? "object" : "array") : null,
       path: ctx.parent ? path(ctx) : null,
+      pythonPath: ctx.parent ? path(ctx, true) : null,
     };
   }
 
