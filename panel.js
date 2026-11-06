@@ -323,9 +323,13 @@ function matches(s) {
   return matchesFilters(s) && inTimeRange(s);
 }
 
+// The overview redraws (throttled) when requests or filters change; not on scrolling.
+const overviewChanged = () => { if (typeof Overview !== "undefined") Overview.invalidate(); };
+
 function applyFilters() {
   viewDirty = true;
   scheduleRefresh();
+  overviewChanged();
 }
 
 /* ---------------------------------------------------------------------------
@@ -665,7 +669,6 @@ function refreshView() {
   // With a time range picked in the overview, the waterfall column shows that range.
   if (state.timeRange) { t0 = state.timeRange.from; t1 = state.timeRange.to; }
   renderRows(t0, Math.max(1, t1 - t0), now);
-  if (typeof Overview !== "undefined") Overview.draw();
 
   $("st-count").textContent = visible === store.size
     ? `${store.size} request${store.size === 1 ? "" : "s"}`
@@ -698,7 +701,7 @@ function refreshView() {
 // Keep pending bars growing.
 setInterval(() => {
   for (const s of store.values()) {
-    if (s.state === "pending") { scheduleRefresh(); return; }
+    if (s.state === "pending") { scheduleRefresh(); overviewChanged(); return; }
   }
 }, 1000);
 
@@ -748,6 +751,7 @@ function applyBatch(list, removed) {
   }
 
   scheduleRefresh();
+  if (list.length || (removed && removed.length)) overviewChanged();
   if (selectedChanged) scheduleDetailsReload();
   if (tabsDirty) scheduleTabRefresh();
 }
