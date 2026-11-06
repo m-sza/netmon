@@ -2258,7 +2258,7 @@ function bodyView(buf, mime, charset, url, ctx) {
     ...[["pretty", "Pretty"], ["min", "Minified"]].map(([f, label]) =>
       h("button", { "data-fmt": f, title: f === sentFmt ? "As sent" : "Reformatted (values unchanged)", onclick: () => { fmt = f; show(); } }, label)));
   if (fmtSeg) fmtCtl.set(fmtSeg, () => {
-    if (!state.rawBody) { state.rawBody = true; rawBox.checked = true; }
+    if (!state.rawBody) { state.rawBody = true; rawBox.checked = true; fmt = "min"; } // from the tree: the compact form first
     else fmt = fmt === "pretty" ? "min" : "pretty";
     show();
     toast(`JSON ${fmt === "pretty" ? "pretty-printed" : "minified"}${fmt === sentFmt ? " (as sent)" : ""}`);
