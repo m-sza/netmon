@@ -15,6 +15,7 @@ const emptyMsg = $("empty");
 const tabSelect = $("tab-filter");
 const recordBtn = $("btn-record");
 const bodiesChk = $("opt-bodies");
+const preserveChk = $("opt-preserve");
 
 const OWN_ORIGIN = browser.runtime.getURL("");
 const BROWSER = IS_CHROME ? "Chrome" : "Firefox";
@@ -800,6 +801,7 @@ function applySettings(st) {
   recordBtn.classList.toggle("paused", !st.recording);
   recordBtn.title = st.recording ? "Pause recording" : "Resume recording";
   bodiesChk.checked = st.captureBodies;
+  preserveChk.checked = st.preserveLog !== false;
   state.blocked = new Set(st.blocked || []);
   scheduleRefresh();
 }
@@ -831,6 +833,9 @@ port.onMessage.addListener((msg) => {
     case "timing":
       Overview.addTiming(msg.timing);
       break;
+    case "tabCleared":
+      Overview.dropTab(msg.tabId); // its requests arrive as removals in the next update
+      break;
     case "settings":
       applySettings(msg.settings);
       break;
@@ -850,6 +855,9 @@ if (IS_CHROME) {
     "“Network Monitor started debugging this browser” bar. Clicking Cancel there turns this off.";
 }
 
+preserveChk.addEventListener("change", () => {
+  browser.runtime.sendMessage({ cmd: "setSettings", settings: { preserveLog: preserveChk.checked } });
+});
 bodiesChk.addEventListener("change", () => {
   browser.runtime.sendMessage({ cmd: "setSettings", settings: { captureBodies: bodiesChk.checked } });
 });

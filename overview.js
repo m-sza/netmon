@@ -347,6 +347,10 @@ const Overview = (() => {
 
   return {
     invalidate: () => invalidate(),
+    dropTab(tabId) {
+      for (const [k, t] of timings) if (t.tabId === tabId) timings.delete(k);
+      invalidate();
+    },
     addTiming(t) { if (t) { timings.set(`${t.tabId}:${Math.round(t.nav)}`, t); invalidate(); } },
     reset(list) {
       timings.clear();

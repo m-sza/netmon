@@ -28,7 +28,8 @@ function spec(...opts) {
 // everything recorded in memory. Calling an extension API resets that timer.
 if (IS_CHROME) setInterval(() => browser.runtime.getPlatformInfo(), 20000);
 
-const settings = { recording: true, captureBodies: true };
+// preserveLog off: a new page load in a tab clears that tab's earlier requests (as in DevTools).
+const settings = { recording: true, captureBodies: true, preserveLog: true };
 
 /* ---------------------------------------------------------------------------
  * State
@@ -87,6 +88,13 @@ function broadcast(msg) {
   for (const p of ports) {
     try { p.postMessage(msg); } catch { /* port closed */ }
   }
+}
+
+// Drops one tab's requests and page timings (Preserve log off).
+function clearTab(tabId) {
+  for (const e of entries.values()) if (e.tabId === tabId) dropEntry(e);
+  for (const [k, t] of pageTimings) if (t.tabId === tabId) pageTimings.delete(k);
+  broadcast({ type: "tabCleared", tabId });
 }
 
 function dropEntry(e) {
@@ -384,6 +392,11 @@ function onBeforeRequest(d) {
   if (origin.startsWith(PANEL_URL) || doc.startsWith(PANEL_URL) || (panelTabId !== null && d.tabId === panelTabId)) return block;
   const resent = origin.startsWith(OWN_ORIGIN_BARE) || doc.startsWith(OWN_ORIGIN_BARE) ? claimResend(d) : null;
   if (!settings.recording && !resent) return block;
+
+  // Preserve log off: a page load (not a redirect step of one) starts the tab's log afresh.
+  if (!settings.preserveLog && d.type === "main_frame" && d.tabId >= 0 && !resent && !redirectSources.has(d.requestId)) {
+    clearTab(d.tabId);
+  }
 
   const e = makeEntry(d);
   if (IS_CHROME) noteFrameDocument(d);
@@ -1306,6 +1319,7 @@ browser.storage.local.get(["settings", "blocked"]).then(({ settings: saved, bloc
   if (saved) {
     if (typeof saved.recording === "boolean") settings.recording = saved.recording;
     if (typeof saved.captureBodies === "boolean") settings.captureBodies = saved.captureBodies;
+    if (typeof saved.preserveLog === "boolean") settings.preserveLog = saved.preserveLog;
   }
   updateBadge();
   syncBlockRules();
@@ -1447,7 +1461,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       clearAll();
       return Promise.resolve(true);
     case "setSettings":
-      for (const k of ["recording", "captureBodies"]) {
+      for (const k of ["recording", "captureBodies", "preserveLog"]) {
         if (typeof msg.settings[k] === "boolean") settings[k] = msg.settings[k];
       }
       if (IS_CHROME) setDebugging(settings.captureBodies);
