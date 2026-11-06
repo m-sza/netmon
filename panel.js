@@ -39,6 +39,7 @@ const state = {
   detailsTab: "headers",
   rawHeaders: false,
   rawBody: false,          // bodies as source text, not as a JSON tree or page preview
+  textFormat: "sent",      // raw JSON: "sent" (as received), "pretty" or "min"
   recording: true,
   captureBodies: true,
   blocked: new Set(),
@@ -1610,9 +1611,17 @@ document.addEventListener("keydown", (ev) => {
     // Ctrl+Shift + Up/Down, Home/End: highlight a row of the details. Left /
     // Right: collapse / expand a JSON section.
     if (accel && ev.shiftKey) {
-      const MOVE = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10, Home: "first", End: "last" };
+      const MOVE = { ArrowDown: 1, ArrowUp: -1, Home: "first", End: "last" };
       if (ev.key in MOVE) { ev.preventDefault(); moveDetailsCursor(MOVE[ev.key]); return; }
       if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { ev.preventDefault(); stepDetailsCursor(ev.key === "ArrowRight" ? 1 : -1); return; }
+    }
+    // Alt+Page Up/Down: the highlight 10 rows up / down. (Ctrl+Shift+Page
+    // Up/Down would fit better, but Firefox and Chrome keep those for moving
+    // tabs and never pass them to the page.)
+    if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && (ev.key === "PageDown" || ev.key === "PageUp")) {
+      ev.preventDefault();
+      moveDetailsCursor(ev.key === "PageDown" ? 10 : -10);
+      return;
     }
     // Letters by what they type, or by their key on layouts without Latin letters.
     const letter = /^[a-z]$/i.test(ev.key) ? ev.key.toLowerCase() : /^Key[A-Z]$/.test(ev.code) ? ev.code.slice(3).toLowerCase() : null;
@@ -1622,6 +1631,13 @@ document.addEventListener("keydown", (ev) => {
       if (accel && !ev.shiftKey && letter === "c" && !String(getSelection())) { ev.preventDefault(); copyFromDetailsCursor("row"); return; }
       const what = plain && (letter === "c" && !ev.shiftKey ? "value" : letter === "k" && !ev.shiftKey ? "key" : letter === "p" ? (ev.shiftKey ? "pypath" : "path") : null);
       if (what) { ev.preventDefault(); copyFromDetailsCursor(what); return; }
+    }
+    if (plain && !ev.shiftKey && letter === "m") {
+      ev.preventDefault();
+      const seg = detailsBody.querySelector(".fmt-seg");
+      if (seg) fmtCtl.get(seg)();
+      else toast("Pretty-printing is for JSON bodies");
+      return;
     }
     if (plain && !ev.shiftKey && letter === "r") {
       ev.preventDefault();
@@ -2231,17 +2247,31 @@ function bodyView(buf, mime, charset, url, ctx) {
   const treeBtns = tree && h("span", { class: "tree-btns" },
     h("button", { class: "text-btn", onclick: () => tree.expandAll() }, "Expand all"),
     h("button", { class: "text-btn", onclick: () => tree.collapseAll() }, "Collapse all"));
-  let highlighted = false;
+  // Raw JSON as sent, pretty-printed or minified (the M key cycles).
+  const formatted = {};
+  const textFor = (f) => (!tree || f === "sent" ? text : (formatted[f] ??= reformatJson(text, f === "pretty")));
+  const fmtSeg = tree && h("span", { class: "seg fmt-seg", title: "Show the JSON as sent, pretty-printed or minified. Key: M" },
+    ...TEXT_FORMATS.map(([f, label]) => h("button", { "data-fmt": f, onclick: () => { state.textFormat = f; show(); } }, label)));
+  if (fmtSeg) fmtCtl.set(fmtSeg, () => {
+    if (!state.rawBody) { state.rawBody = true; rawBox.checked = true; }
+    else state.textFormat = TEXT_FORMATS[(TEXT_FORMATS.findIndex(([f]) => f === state.textFormat) + 1) % TEXT_FORMATS.length][0];
+    show();
+    toast(TEXT_FORMATS.find(([f]) => f === state.textFormat)[2]);
+  });
+  let highlighted = null; // the format the source view shows
   const show = () => {
     const usePreview = preview && !state.rawBody;
     if (preview) preview.hidden = !usePreview;
     const useTree = tree && !state.rawBody;
-    if (tree) { tree.el.hidden = !useTree; treeBtns.hidden = !useTree; }
+    if (tree) { tree.el.hidden = !useTree; treeBtns.hidden = !useTree; fmtSeg.hidden = useTree; }
     pre.hidden = useTree || usePreview;
     if (useTree || usePreview) { limitNote.hidden = plainNote.hidden = true; finder.refresh(); return; }
-    const shown = text.length > TEXT_LIMIT ? text.slice(0, TEXT_LIMIT) : text;
-    if (!highlighted) { pre.replaceChildren(Syntax.highlight(shown, lang)); highlighted = true; }
-    limitNote.hidden = text.length <= TEXT_LIMIT;
+    const fmt = tree ? state.textFormat : "sent";
+    if (fmtSeg) for (const b of fmtSeg.children) b.classList.toggle("active", b.dataset.fmt === fmt);
+    const body = textFor(fmt);
+    const shown = body.length > TEXT_LIMIT ? body.slice(0, TEXT_LIMIT) : body;
+    if (highlighted !== fmt) { pre.replaceChildren(Syntax.highlight(shown, lang)); highlighted = fmt; }
+    limitNote.hidden = body.length <= TEXT_LIMIT;
     plainNote.hidden = lang === "text" || shown.length <= Syntax.MAX_CHARS;
     finder.refresh();
   };
@@ -2251,17 +2281,59 @@ function bodyView(buf, mime, charset, url, ctx) {
   show();
 
   const actions = h("div", { class: "actions" },
-    h("button", { class: "text-btn", onclick: (e) => copyText(text, e.currentTarget) }, "Copy"),
+    h("button", { class: "text-btn", title: "Copy the body (raw JSON in the format shown)", onclick: (e) => copyText(tree && state.rawBody ? textFor(state.textFormat) : text, e.currentTarget) }, "Copy"),
     treeBtns,
     rawBox
       ? h("label", { class: "check", title: preview ? "Show the HTML source instead of the page (the preview runs no scripts). Key: R" : "Show the JSON as sent instead of the tree. Key: R" },
           rawBox, "Raw")
       : null,
+    fmtSeg,
     finder.el,
     h("span", { class: "note" }, `${Syntax.label(lang)} · ${fmtBytes(size)}`));
 
   wrap.append(actions, limitNote, plainNote, ...(tree ? [tree.el] : []), ...(preview ? [preview] : []), pre);
   return wrap;
+}
+
+const TEXT_FORMATS = [["sent", "As sent", "JSON as sent"], ["pretty", "Pretty", "JSON pretty-printed"], ["min", "Minified", "JSON minified"]];
+const fmtCtl = new WeakMap(); // .fmt-seg element -> cycles the format
+
+/* Re-lays out valid JSON text: pretty (2-space indent) or minified. Works on
+ * the text, not on parsed values, so numbers and string escapes stay exactly
+ * as sent (JSON.parse would round big numbers). */
+function reformatJson(text, pretty) {
+  const out = [];
+  let depth = 0;
+  const nl = () => "\n" + "  ".repeat(depth);
+  const n = text.length;
+  for (let i = 0; i < n;) {
+    const c = text[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      out.push(text.slice(i, j + 1));
+      i = j + 1;
+    } else if (c === " " || c === "\n" || c === "\r" || c === "\t") {
+      i++;
+    } else if (!pretty || !"{}[],:".includes(c)) {
+      let j = i + 1; // a run of other characters (numbers, literals; punctuation when minifying)
+      while (j < n && !" \n\r\t\"".includes(text[j]) && (!pretty || !"{}[],:".includes(text[j]))) j++;
+      out.push(text.slice(i, j));
+      i = j;
+    } else if (c === "{" || c === "[") {
+      let j = i + 1;
+      while (j < n && " \n\r\t".includes(text[j])) j++;
+      if (text[j] === (c === "{" ? "}" : "]")) { out.push(c + text[j]); i = j + 1; continue; } // {} and [] stay on one line
+      depth++;
+      out.push(c + nl());
+      i++;
+    } else {
+      if (c === "}" || c === "]") { depth--; out.push(nl() + c); }
+      else out.push(c === "," ? "," + nl() : ": ");
+      i++;
+    }
+  }
+  return out.join("");
 }
 
 // Right-click in a JSON tree: copy the key, the value or section, the object
