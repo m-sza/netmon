@@ -439,7 +439,7 @@ function fillRow(tr, s) {
   cStatus.className = "c-status " + statusClass(s);
   if (s.status != null) {
     const st = statusInfo(s);
-    setIfChanged(cStatus, "title", `${s.status} ${st.name}`.trim() + `\n${st.text}`);
+    setIfChanged(cStatus, "title", `${s.status} ${st.name}`.trim());
   } else setIfChanged(cStatus, "title", s.state === "pending" ? "Pending" : (s.error || ""));
 
   cMethod.textContent = s.method;
@@ -1610,7 +1610,7 @@ document.addEventListener("keydown", (ev) => {
     // Ctrl+Shift + Up/Down, Home/End: highlight a row of the details. Left /
     // Right: collapse / expand a JSON section.
     if (accel && ev.shiftKey) {
-      const MOVE = { ArrowDown: 1, ArrowUp: -1, Home: "first", End: "last" };
+      const MOVE = { ArrowDown: 1, ArrowUp: -1, PageDown: 10, PageUp: -10, Home: "first", End: "last" };
       if (ev.key in MOVE) { ev.preventDefault(); moveDetailsCursor(MOVE[ev.key]); return; }
       if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { ev.preventDefault(); stepDetailsCursor(ev.key === "ArrowRight" ? 1 : -1); return; }
     }
@@ -1916,7 +1916,7 @@ function causedBy(d) {
 function renderHeaders(d) {
   const st = d.status != null ? statusInfo(d) : null;
   const statusText = st
-    ? h("span", null, h("span", { class: "status-chip " + statusClass(d) }, `${d.status} ${st.name}`.trim()), " ", h("span", { class: "status-why" }, st.text))
+    ? h("span", { class: "status-chip " + statusClass(d), title: st.text }, `${d.status} ${st.name}`.trim())
     : d.state === "pending" ? "Pending…" : "—";
 
   const cause = causedBy(d);
@@ -2417,7 +2417,7 @@ function setDetailsCursor(el, reveal) {
   if (reveal) revealInDetails(el.getBoundingClientRect(), false);
 }
 const hasDetailsCursor = () => !!detailsCursor && detailsCursor.isConnected && detailsCursor.getClientRects().length > 0;
-// how: +1 / -1 (a row down / up), "first" or "last". Without a highlighted
+// how: a number of rows down (+) or up (-), "first" or "last". Without a highlighted
 // row, it starts from the rows in view.
 function moveDetailsCursor(how) {
   const lines = detailLines();
@@ -2430,6 +2430,7 @@ function moveDetailsCursor(how) {
     const inView = lines.filter((l) => { const r = l.getBoundingClientRect(); return r.bottom > box.top && r.top < box.bottom; });
     const start = how > 0 ? inView[0] : inView[inView.length - 1];
     i = start ? lines.indexOf(start) : how > 0 ? 0 : lines.length - 1;
+    if (Math.abs(how) > 1) i = Math.max(0, Math.min(lines.length - 1, i + how));
   } else i = Math.max(0, Math.min(lines.length - 1, i + how));
   setDetailsCursor(lines[i], true);
 }

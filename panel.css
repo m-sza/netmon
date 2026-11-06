@@ -856,5 +856,4 @@ table.kv tr.dcursor td:last-child { box-shadow: inset 0 1px var(--accent), inset
 ::highlight(nm-find) { background-color: var(--find-bg); color: inherit; }
 ::highlight(nm-find-current) { background-color: var(--find-current-bg); color: inherit; }
 
-/* The plain explanation after a status code in the Headers tab */
-.status-why { color: var(--muted); margin-left: 4px; }
+.status-chip[title] { cursor: help; }
