@@ -38,6 +38,20 @@
     else if (!timer) timer = setTimeout(flush, 100);
   }, true);
 
+  // Load milestones of the top-level page, as absolute times like request
+  // timestamps, for the overview's DOMContentLoaded and Load lines.
+  if (window.top === window) {
+    const report = () => {
+      const nav = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+      if (!nav) return;
+      const at = (v) => (v > 0 ? performance.timeOrigin + v : undefined);
+      browser.runtime.sendMessage({ cmd: "pageTiming", nav: performance.timeOrigin, dcl: at(nav.domContentLoadedEventStart), load: at(nav.loadEventStart) })
+        .catch(() => { /* background reloading */ });
+    };
+    document.addEventListener("DOMContentLoaded", report, { once: true });
+    window.addEventListener("load", () => setTimeout(report, 0), { once: true });
+  }
+
   browser.runtime.onMessage.addListener((msg) => {
     if (!msg || msg.cmd !== "wsSend") return undefined;
     const reqId = nextReq++;

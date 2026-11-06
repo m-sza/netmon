@@ -7,7 +7,7 @@
 set -e
 cd "$(dirname "$0")"
 
-SHARED="compat.js common.js background.js panel.js actions.js syntax.js jsontree.js filters.js preview.js fontinfo.js
+SHARED="compat.js common.js background.js panel.js overview.js actions.js syntax.js jsontree.js filters.js preview.js fontinfo.js
   page-hook.js ws-relay.js panel.html panel.css LICENSE-chromium-devtools.txt"
 
 for f in $SHARED manifest.json manifest.chrome.json sw.js icons/icon.svg icons/icon-16.png icons/icon-32.png icons/icon-48.png icons/icon-128.png; do

@@ -43,6 +43,7 @@ const state = {
   captureBodies: true,
   blocked: new Set(),
   blockers: [],            // other add-ons that can block requests
+  timeRange: null,         // { from, to } (epoch ms) chosen in the overview, or null
 };
 
 let current = null;       // details object of the selected request
@@ -302,12 +303,23 @@ const filterHelpers = {
   unicodeUrl: (u) => { try { return decodeURI(u); } catch { return u; } },
 };
 
-function matches(s) {
+// Every filter except the overview's time range (the overview shows these).
+function matchesFilters(s) {
   if (state.typeFilter !== "all" && category(s) !== state.typeFilter) return false;
   if (state.tabFilter === "current") { if (state.originTabId != null && s.tabId !== state.originTabId) return false; }
   else if (state.tabFilter === "none") { if (s.tabId >= 0) return false; }
   else if (state.tabFilter !== "all" && String(s.tabId) !== state.tabFilter) return false;
   return NetFilter.matchAll(state.filterTokens, s, filterHelpers);
+}
+
+// A request is in the time range if any part of it falls inside.
+function inTimeRange(s, now = Date.now()) {
+  const r = state.timeRange;
+  return !r || (s.start <= r.to && (s.end ?? now) >= r.from);
+}
+
+function matches(s) {
+  return matchesFilters(s) && inTimeRange(s);
 }
 
 function applyFilters() {
@@ -648,7 +660,10 @@ function refreshView() {
     if (s.size) size += s.size;
   }
   const visible = view.length;
+  // With a time range picked in the overview, the waterfall column shows that range.
+  if (state.timeRange) { t0 = state.timeRange.from; t1 = state.timeRange.to; }
   renderRows(t0, Math.max(1, t1 - t0), now);
+  if (typeof Overview !== "undefined") Overview.draw();
 
   $("st-count").textContent = visible === store.size
     ? `${store.size} request${store.size === 1 ? "" : "s"}`
@@ -756,6 +771,7 @@ port.onMessage.addListener((msg) => {
       state.originTabId = msg.originTabId ?? null;
       applySettings(msg.settings);
       applyBatch(msg.entries, []);
+      Overview.reset(msg.timings);
       stickPending = true;
       refreshTabs();
       break;
@@ -769,6 +785,10 @@ port.onMessage.addListener((msg) => {
       break;
     case "cleared":
       clearAllRows();
+      Overview.reset();
+      break;
+    case "timing":
+      Overview.addTiming(msg.timing);
       break;
     case "settings":
       applySettings(msg.settings);

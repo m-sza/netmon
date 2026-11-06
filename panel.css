@@ -52,6 +52,7 @@
   --radius-lg: 8px;           /* popovers, menus, dialogs */
   --tg-grey: #5f6368; --tg-blue: #1a73e8; --tg-red: #d93025; --tg-yellow: #f9ab00; --tg-green: #188038;
   --tg-pink: #d01884; --tg-purple: #9334e6; --tg-cyan: #007b83; --tg-orange: #fa903e;
+  --overview-dim: rgb(255 255 255 / 72%); /* over the overview outside a picked range */
   --menu-pad: 4px;            /* inside menus and listbox popovers */
   --item-pad-x: 10px;         /* menu and listbox items */
   --border-strong: #c4c4cc;   /* control borders on hover */
@@ -102,6 +103,7 @@
     --tok-val: #ffd0a0;
     --tg-grey: #dadce0; --tg-blue: #8ab4f8; --tg-red: #f28b82; --tg-yellow: #fdd663; --tg-green: #81c995;
     --tg-pink: #ff8bcb; --tg-purple: #c58af9; --tg-cyan: #78d9ec; --tg-orange: #fcad70;
+    --overview-dim: rgb(35 35 39 / 72%);
     --border-strong: #55545f;
     --on-accent: #0e1a26;
     --ring: 0 0 0 2px rgb(117 191 255 / 35%);
@@ -300,6 +302,23 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 .tab-closed .tab-title, .select-btn.tab-closed .select-label { text-decoration: line-through; color: var(--muted); }
 #tab-options .tab-empty { padding: 4px var(--item-pad-x); color: var(--muted); }
 #btn-har svg { fill: none; }
+
+/* ---------------- Overview (timeline above the list) ---------------- */
+#overview {
+  position: relative; flex: none; height: 84px;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+}
+#overview-canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+#overview-range {
+  position: absolute; top: 2px; right: 6px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 2px 0 8px; border-radius: var(--radius);
+  background: var(--menu-bg); border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  font-size: 11px;
+}
+#overview-range .text-btn { height: 20px; }
+#btn-overview svg { fill: none; stroke: currentColor; }
+#btn-overview.active { color: var(--accent); background: var(--hover); }
 
 /* ---------------- Layout ---------------- */
 #main { flex: 1; display: flex; min-height: 0; }

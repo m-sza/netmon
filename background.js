@@ -1321,6 +1321,7 @@ function clearAll() {
   totalBodyBytes = 0;
   recent.length = 0;
   pendingHints = [];
+  pageTimings.clear();
   broadcast({ type: "cleared" });
 }
 
@@ -1396,6 +1397,23 @@ async function tabList() {
   };
 }
 
+/* Page load milestones (DOMContentLoaded, load) of top-level documents, from
+ * the content script, for the overview's blue and red marker lines. */
+const pageTimings = new Map(); // "tabId:navStart" -> { tabId, url, nav, dcl, load }
+const MAX_PAGE_TIMINGS = 300;
+function onPageTiming(msg, sender) {
+  const tabId = sender.tab && sender.tab.id;
+  const nav = Number(msg.nav);
+  if (tabId == null || !Number.isFinite(nav) || !settings.recording) return;
+  const key = `${tabId}:${Math.round(nav)}`;
+  const t = pageTimings.get(key) || { tabId, url: String(sender.url || ""), nav };
+  for (const k of ["dcl", "load"]) if (Number.isFinite(Number(msg[k])) && msg[k] > 0) t[k] = Number(msg[k]);
+  pageTimings.delete(key);
+  pageTimings.set(key, t);
+  if (pageTimings.size > MAX_PAGE_TIMINGS) pageTimings.delete(pageTimings.keys().next().value);
+  broadcast({ type: "timing", timing: t });
+}
+
 browser.runtime.onConnect.addListener((port) => {
   if (port.name !== "panel") return;
   ports.add(port);
@@ -1404,12 +1422,14 @@ browser.runtime.onConnect.addListener((port) => {
     originTabId,
     settings: publicSettings(),
     entries: [...entries.values()].map(summarize),
+    timings: [...pageTimings.values()],
   });
   port.onDisconnect.addListener(() => ports.delete(port));
 });
 
 browser.runtime.onMessage.addListener((msg, sender) => {
   if (msg && msg.cmd === "ws") { onWsEvents(msg.events, sender); return undefined; }
+  if (msg && msg.cmd === "pageTiming") { onPageTiming(msg, sender); return undefined; }
   // Everything else comes from the panel, never from content scripts.
   if (!(sender.url || "").startsWith(OWN_ORIGIN)) return undefined;
   switch (msg && msg.cmd) {
