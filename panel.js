@@ -708,7 +708,7 @@ function renderRows(t0, span, now) {
     if (h0 && Math.abs(h0 - rowH) > 0.5) { rowH = h0; scheduleRefresh(); }
     else if (h0) rowHVerified = true;
   }
-  if (stickPending) { stickPending = false; listPane.scrollTop = maxTop; }
+  if (stickPending) { stickPending = false; listScroller.to(maxTop, 0); } // following new requests: instant
 }
 
 function refreshView() {
@@ -1363,30 +1363,39 @@ tbody.addEventListener("click", (ev) => {
   select(Number(tr.dataset.id));
 });
 
-/* A short eased scroll of the details pane, so the eye can follow the text.
- * Presses during an animation add to its target instead of restarting from
- * where it happens to be, so fast or held keys still cover the full distance. */
-let detailsScroll = null; // { from, to, start, dur }
-function smoothScrollDetails(delta, dur) {
-  const max = detailsBody.scrollHeight - detailsBody.clientHeight;
-  const base = detailsScroll ? detailsScroll.to : detailsBody.scrollTop;
-  const to = Math.max(0, Math.min(max, base + delta));
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { detailsScroll = null; detailsBody.scrollTop = to; return; }
-  const running = !!detailsScroll;
-  detailsScroll = { from: detailsBody.scrollTop, to, start: performance.now(), dur };
-  if (running) return;
-  const step = (now) => {
-    const a = detailsScroll;
-    if (!a) return;
-    const t = Math.min(1, (now - a.start) / a.dur);
-    const eased = 1 - (1 - t) ** 3; // ease-out
-    detailsBody.scrollTop = a.from + (a.to - a.from) * eased;
-    if (t < 1) requestAnimationFrame(step);
-    else detailsScroll = null;
+/* Short eased scrolling for the keyboard (details pane and request list), so
+ * the eye can follow. Presses during an animation add to its target instead
+ * of restarting from where it happens to be, so fast or held keys still cover
+ * the full distance. */
+function smoothScroller(el) {
+  let anim = null; // { from, to, start, dur }
+  const api = {
+    // Where the scroll is heading (or is, when still).
+    get target() { return anim ? anim.to : el.scrollTop; },
+    to(target, dur) {
+      const to = Math.max(0, Math.min(el.scrollHeight - el.clientHeight, target));
+      if (!dur || matchMedia("(prefers-reduced-motion: reduce)").matches) { anim = null; el.scrollTop = to; return; }
+      const running = !!anim;
+      anim = { from: el.scrollTop, to, start: performance.now(), dur };
+      if (running) return;
+      const step = (now) => {
+        const a = anim;
+        if (!a) return;
+        const t = Math.min(1, (now - a.start) / a.dur);
+        el.scrollTop = a.from + (a.to - a.from) * (1 - (1 - t) ** 3); // ease-out
+        if (t < 1) requestAnimationFrame(step);
+        else anim = null;
+      };
+      requestAnimationFrame(step);
+    },
+    by(delta, dur) { api.to(api.target + delta, dur); },
+    stop() { anim = null; },
   };
-  requestAnimationFrame(step);
+  el.addEventListener("wheel", api.stop, { passive: true }); // the wheel takes over
+  return api;
 }
-detailsBody.addEventListener("wheel", () => { detailsScroll = null; }, { passive: true });
+const detailsScroller = smoothScroller(detailsBody);
+const listScroller = smoothScroller(listPane);
 
 // Moves the keyboard to a row: the open details follow it; otherwise only the cursor moves.
 function goToRow(id) {
@@ -1419,17 +1428,22 @@ function moveCursor(id) {
 }
 
 // Scrolls just enough to bring row `i` of the view into sight.
+// Glides (briefly) rather than jumps, measured from where an ongoing glide is heading.
 function revealIndex(i) {
   const headH = tbody.parentElement.tHead.offsetHeight;
   const top = i * rowH;
   const room = listPane.clientHeight - headH;
-  if (top < listPane.scrollTop) listPane.scrollTop = top;
-  else if (top + rowH > listPane.scrollTop + room) listPane.scrollTop = top + rowH - room;
+  const from = listScroller.target;
+  let to = from;
+  if (top < from) to = top;
+  else if (top + rowH > from + room) to = top + rowH - room;
+  if (to === from) return;
+  listScroller.to(to, Math.min(200, 90 + Math.abs(to - from) / rowH * 10));
 }
 
 function select(id) {
   if (!store.has(id)) return;
-  detailsScroll = null; // a scroll animation belongs to the request it started on
+  detailsScroller.stop(); // a scroll animation belongs to the request it started on
   state.selectedId = id;
   state.cursorId = id;
   if (viewPos.has(id)) revealIndex(viewPos.get(id));
@@ -1514,10 +1528,10 @@ document.addEventListener("keydown", (ev) => {
       ev.preventDefault();
       const by = SCROLL[ev.key];
       const page = Math.max(40, detailsBody.clientHeight - 40);
-      if (by === "top") smoothScrollDetails(-Infinity, 200);
-      else if (by === "bottom") smoothScrollDetails(Infinity, 200);
-      else if (typeof by === "string") smoothScrollDetails(by === "page" ? page : -page, 200);
-      else smoothScrollDetails(by, 120);
+      if (by === "top") detailsScroller.to(0, 200);
+      else if (by === "bottom") detailsScroller.to(Infinity, 200);
+      else if (typeof by === "string") detailsScroller.by(by === "page" ? page : -page, 200);
+      else detailsScroller.by(by, 120);
       return;
     }
   }

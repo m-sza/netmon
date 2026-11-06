@@ -40,6 +40,18 @@
         "<all_urls>"
       ],
       "js": [
+        "page-hook.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN",
+      "match_about_blank": true
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
         "compat.js",
         "ws-relay.js"
       ],

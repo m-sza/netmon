@@ -329,7 +329,9 @@ body.row-resizing, body.row-resizing * { cursor: row-resize !important; user-sel
 /* ---------------- Layout ---------------- */
 #main { flex: 1; display: flex; min-height: 0; }
 
-#list-pane { flex: 1; min-width: 200px; overflow: auto; position: relative; }
+/* overflow-anchor: the virtual list resizes its spacer rows as you scroll, and
+   the browser's scroll anchoring would nudge the position back (jitter). */
+#list-pane { flex: 1; min-width: 200px; overflow: auto; position: relative; overflow-anchor: none; }
 
 #splitter {
   width: 4px;

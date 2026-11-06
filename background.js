@@ -563,23 +563,31 @@ const MAX_SOCKETS = 2000;
 
 const sockets = new Map(); // "tabId/frameId/pageId" -> { tabId, frameId, url, created, docUrl, entry, early }
 
-(async () => {
-  const script = {
-    id: WS_SCRIPT_ID,
-    js: ["page-hook.js"],
-    matches: ["<all_urls>"],
-    runAt: "document_start",
-    allFrames: true,
-    world: "MAIN",
-  };
-  try {
-    const existing = await browser.scripting.getRegisteredContentScripts({ ids: [WS_SCRIPT_ID] });
-    if (existing.length) await browser.scripting.updateContentScripts([script]);
-    else await browser.scripting.registerContentScripts([script]);
-  } catch (err) {
-    console.error("Couldn't register the WebSocket hook:", err);
+/* page-hook.js is declared in the manifest (world MAIN), so the browser puts
+ * it in every page before the page's own scripts run, from the first page
+ * after startup on. (It used to be registered from here at startup, which
+ * pages loading during startup or right after an update could miss; such a
+ * registration is removed.) */
+browser.scripting.getRegisteredContentScripts({ ids: [WS_SCRIPT_ID] })
+  .then((old) => old.length && browser.scripting.unregisterContentScripts({ ids: [WS_SCRIPT_ID] }))
+  .catch(() => {});
+
+/* Tabs already open when the add-on is installed or updated don't get the
+ * manifest's content scripts until they reload, so they're added now. Both
+ * scripts skip themselves if a working copy is already there. */
+async function injectIntoOpenTabs() {
+  let tabs = [];
+  try { tabs = await browser.tabs.query({ url: ["http://*/*", "https://*/*"] }); } catch { return; }
+  for (const tab of tabs) {
+    const target = { tabId: tab.id, allFrames: true };
+    browser.scripting.executeScript({ target, files: ["page-hook.js"], world: "MAIN", injectImmediately: true })
+      .then(() => browser.scripting.executeScript({ target, files: ["compat.js", "ws-relay.js"], injectImmediately: true }))
+      .catch(() => { /* pages extensions can't touch (store, settings, ...) */ });
   }
-})();
+}
+browser.runtime.onInstalled.addListener((d) => {
+  if (d.reason === "install" || d.reason === "update") injectIntoOpenTabs();
+});
 
 // ws:// and the http:// form the handshake may be reported under are the same socket.
 const wsKey = (url) => String(url || "").replace(/^ws(s?):/i, "http$1:");

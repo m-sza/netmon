@@ -3,6 +3,13 @@
 /* Content script: forwards WebSocket events from page-hook.js to the background,
  * batched so busy sockets don't send one message per frame. */
 (() => {
+  /* One working relay per frame. After the add-on updates, the old copy can
+   * no longer reach the background; it then steps aside for the new one. */
+  const alive = () => { try { return !!browser.runtime.id; } catch { return false; } };
+  const prev = globalThis.__netmonRelay;
+  if (prev && prev.alive()) return;
+  globalThis.__netmonRelay = { alive };
+
   const EVT = "__netmon_ws__";
   const CMD = "__netmon_ws_cmd__";
   const pending = new Map(); // reqId -> resolve, for sends from the monitor
@@ -21,7 +28,8 @@
     browser.runtime.sendMessage({ cmd: "ws", events }).catch(() => { /* background busy or reloading */ });
   }
 
-  window.addEventListener(EVT, (ev) => {
+  window.addEventListener(EVT, function onEvent(ev) {
+    if (!alive()) { window.removeEventListener(EVT, onEvent, true); return; } // an update replaced this copy
     const detail = ev.detail;
     if (typeof detail !== "string") return;
     if (detail.startsWith('{"k":"result"')) {

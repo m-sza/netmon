@@ -130,7 +130,9 @@
         if (at < 0) continue;
         loc = line.slice(at + 1).replace(/ line \d+ > .*$/, "");
       }
-      if (!loc || /^(moz|chrome)-extension:/.test(loc)) continue;
+      // Skip this hook's own frames: Firefox names a manifest MAIN-world script
+      // "<anonymous code>", a registered one moz-extension://…; Chrome chrome-extension://….
+      if (!loc || /^(moz|chrome)-extension:/.test(loc) || loc.startsWith("<")) continue;
       return { url: loc.replace(/:\d+:\d+$/, ""), loc };
     }
     return null;
