@@ -44,13 +44,17 @@ Produces:
 - `always-on-netmon.xpi` — Firefox (Manifest V2)
 - `dist/chrome/` and `always-on-netmon-chrome.zip` — Chrome (Manifest V3)
 
+`./release.sh notes.md` publishes a GitHub release of the current commit with both packages (bump the version in both manifests first).
+
 `./build.sh --install` also hands the new `.xpi` to your running Firefox, which updates the installed add-on in place (set `FIREFOX=/path/to/firefox` if it picks the wrong one).
 
 ## Install
 
-**Firefox:** `about:addons` → gear icon → *Install Add-on From File…* → `always-on-netmon.xpi` (unsigned builds need Firefox Developer Edition/Nightly with `xpinstall.signatures.required` set to `false`, or load it temporarily via `about:debugging`).
+Download the latest build from [Releases](https://github.com/m-sza/netmon/releases), or build it yourself (above).
 
-**Chrome:** `chrome://extensions` → enable *Developer mode* → *Load unpacked* → `dist/chrome`.
+**Firefox:** `about:addons` → gear icon → *Install Add-on From File…* → `netmon-X.Y.Z-firefox.xpi`. The build isn't signed by Mozilla, so it needs Firefox Developer Edition or Nightly with `xpinstall.signatures.required` set to `false` in `about:config` (or load it temporarily via `about:debugging`).
+
+**Chrome:** unzip `netmon-X.Y.Z-chrome.zip`, then `chrome://extensions` → enable *Developer mode* → *Load unpacked* → the unzipped folder (or `dist/chrome` when building yourself).
 
 In Chrome, response bodies, TLS details and initiators come from the `chrome.debugger` API, so Chrome shows a "started debugging this browser" bar while *Capture bodies* is on.
 
