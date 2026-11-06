@@ -33,8 +33,6 @@
       <svg viewBox="0 0 16 16" width="16" height="16"><path d="M6 2h4l.5 1H13v1.5H3V3h2.5zM4 6h8l-.6 7.2a1 1 0 0 1-1 .8H5.6a1 1 0 0 1-1-.8z"/></svg>
     </button>
     <span class="sep"></span>
-    <input id="filter" type="search" placeholder="Filter URLs · Enter saves as rules" spellcheck="false"
-           title="Same syntax as Firefox DevTools: text, status-code:, method:, domain:, mime-type:, larger-than: / size-larger-than:, transferred-larger-than:, is:running/cached/blocked/error, regexp:, … Prefix with - to exclude. Press Enter to save what you typed as rules.">
     <button id="btn-rules" class="text-btn" aria-haspopup="dialog">Rules</button>
     <span class="sep"></span>
     <div id="view-mode" class="seg" title="List: requests in order. Tree: each request under the one that caused it.">
@@ -78,7 +76,8 @@
       <span class="note">Every enabled rule must match. Same syntax as Firefox DevTools.</span>
     </div>
     <ul id="rules-list"></ul>
-    <input id="rule-add" type="text" spellcheck="false" placeholder="Add a rule, e.g. -mime-type:text/css · Enter">
+    <input id="rule-add" type="text" spellcheck="false" placeholder="Filter, e.g. -mime-type:text/css · Enter saves it as a rule"
+           title="Filters as you type; Enter saves it as rules (one per word). Same syntax as Firefox DevTools: text, status-code:, method:, domain:, mime-type:, larger-than: / size-larger-than:, transferred-larger-than:, is:running/cached/blocked/error, regexp:, … Prefix with - to exclude.">
     <div class="rules-foot">
       <button id="rules-all-on" class="text-btn">All on</button>
       <button id="rules-all-off" class="text-btn">All off</button>

@@ -226,7 +226,6 @@ input[type=checkbox] { width: 14px; height: 14px; margin: 0; accent-color: var(-
 #btn-record.paused .i-play { display: block; }
 
 
-#filter { font-family: var(--mono); flex: 1 1 160px; max-width: 360px; min-width: 120px; }
 /* Tab picker: a button that opens a listbox grouped by window. */
 .select-btn {
   display: inline-flex; align-items: center; gap: 6px;

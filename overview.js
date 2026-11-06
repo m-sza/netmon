@@ -10,7 +10,7 @@
  *
  * Drawing is in two layers so it stays cheap:
  *  - the bars, ruler and markers are drawn into an offscreen canvas, at most
- *    twice a second, and only when requests or filters changed (invalidate());
+ *    five times a second, and only when requests or filters changed (invalidate());
  *  - hovering and dragging only copy that image and draw the cursor and the
  *    selection on top (paint()), once per animation frame. */
 const Overview = (() => {
@@ -27,7 +27,7 @@ const Overview = (() => {
   const MAX_LANE_H = 6;
   const MIN_BAR_W = 3;
   const MAX_LANES = 64;          // more overlap than this shares lanes
-  const DATA_INTERVAL = 500;     // ms between redraws of the bars: 2 per second
+  const DATA_INTERVAL = 200;     // ms between redraws of the bars: 5 per second
 
   const timings = new Map();     // "tabId:nav" -> { tabId, nav, dcl, load }
   let shown = false;

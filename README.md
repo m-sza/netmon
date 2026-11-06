@@ -2,19 +2,34 @@
 
 A browser extension for Firefox and Chrome that records network traffic in the background, all the time, and shows it in a DevTools-style network panel in its own window. No need to open DevTools before the request happens.
 
+![netmon showing a Wikipedia page load: the overview timeline, the request list and a JSON response](docs/screenshot.png)
+
 ## Features
 
 - Records every tab continuously; view one tab, the current tab or all tabs, with tabs grouped by window and closed tabs kept under their last title
-- Request/response headers, bodies (collapsible JSON tree, syntax highlighting), cookies, timings
+- Overview timeline above the list (like Chrome's): bars colored by request type, DOMContentLoaded/Load markers, drag to filter by time range
+- Request/response headers, bodies (collapsible JSON tree with right-click copy of key, value or path, syntax highlighting), cookies, timings
 - TLS / security details per request
 - WebSocket traffic, including sending and editing-and-resending messages; HAR export includes WebSocket frames
 - Resend / edit and resend requests
 - Copy as cURL, fetch, Python `requests` and Python `curl_cffi`
-- DevTools-compatible filter language (`-mime-type:`, `transferred-larger-than:`, `is:blocked`, `size-larger-than:` …) with a rules editor
+- DevTools-compatible filter language (`-mime-type:`, `transferred-larger-than:`, `is:blocked`, `size-larger-than:` …) in a rules editor (Ctrl+F)
 - Shows which extension blocked a request (e.g. "Blocked by uBlock Origin")
 - Initiator tree view (which script/stylesheet loaded what)
 - Offline preview of HTML (using already-recorded resources), images, SVGs and fonts
 - URL blocking
+
+## Keyboard
+
+| Keys | Action |
+|---|---|
+| ↑ ↓, Page Up/Down, Home/End | Move through the requests |
+| Enter / Space | Open or close the request's details |
+| Tab / Shift+Tab, Shift+→ / Shift+← | Next / previous details tab |
+| Shift+↑ ↓, Shift+Page Up/Down | Scroll the details |
+| Ctrl+R / F5 (Shift for a hard reload) | Reload the inspected tab |
+| Ctrl+F | Filter rules |
+| Esc | Close the details |
 
 ## Build
 

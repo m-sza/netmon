@@ -12,7 +12,6 @@ const detailsPane = $("details-pane");
 const detailsBody = $("details-body");
 const splitter = $("splitter");
 const emptyMsg = $("empty");
-const filterInput = $("filter");
 const tabSelect = $("tab-filter");
 const recordBtn = $("btn-record");
 const bodiesChk = $("opt-bodies");
@@ -836,11 +835,12 @@ const ruleAdd = $("rule-add");
 
 function compileFilters() {
   const ruleText = filterRules.filter((r) => r.enabled).map((r) => r.text).join(" ");
-  state.filterTokens = NetFilter.parse(ruleText + " " + filterInput.value);
+  // What's typed in the Rules box filters live, before Enter saves it.
+  state.filterTokens = NetFilter.parse(ruleText + " " + ruleAdd.value);
   const on = filterRules.filter((r) => r.enabled).length;
   rulesBtn.textContent = filterRules.length ? `Rules (${on}${on !== filterRules.length ? "/" + filterRules.length : ""})` : "Rules";
   rulesBtn.classList.toggle("active", on > 0);
-  rulesBtn.title = on ? filterRules.filter((r) => r.enabled).map((r) => r.text).join("\n") : "Saved filter rules";
+  rulesBtn.title = (on ? filterRules.filter((r) => r.enabled).map((r) => r.text).join("\n") + "\n\n" : "") + "Filter rules (Ctrl+F)";
   applyFilters();
 }
 
@@ -887,7 +887,11 @@ function openRules() {
   rulesPop.style.top = r.bottom + 4 + "px";
   ruleAdd.focus();
 }
-const closeRules = () => { rulesPop.hidden = true; };
+// Closing drops an unsaved filter, so nothing filters that isn't listed as a rule.
+const closeRules = () => {
+  rulesPop.hidden = true;
+  if (ruleAdd.value) { ruleAdd.value = ""; compileFilters(); }
+};
 
 rulesBtn.addEventListener("click", () => (rulesPop.hidden ? openRules() : closeRules()));
 document.addEventListener("mousedown", (ev) => {
@@ -897,25 +901,25 @@ rulesPop.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") { ev.stopPropagation(); closeRules(); rulesBtn.focus(); }
 });
 ruleAdd.addEventListener("keydown", (ev) => {
-  if (ev.key === "Enter" && ruleAdd.value.trim()) { addRules(ruleAdd.value); ruleAdd.value = ""; }
+  if (ev.key === "Enter" && ruleAdd.value.trim()) { const text = ruleAdd.value; ruleAdd.value = ""; addRules(text); }
 });
+let filterTimer = null;
+ruleAdd.addEventListener("input", () => {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(compileFilters, 120);
+});
+// Ctrl+F (Cmd+F) opens the filter rules, like focusing the filter in DevTools.
+document.addEventListener("keydown", (ev) => {
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === "f" || ev.key === "F")) {
+    ev.preventDefault();
+    if (rulesPop.hidden) openRules(); else ruleAdd.focus();
+  }
+}, true);
 $("rules-all-on").addEventListener("click", () => { for (const r of filterRules) r.enabled = true; saveRules(); });
 $("rules-all-off").addEventListener("click", () => { for (const r of filterRules) r.enabled = false; saveRules(); });
 $("rules-copy").addEventListener("click", (ev) => copyText(filterRules.filter((r) => r.enabled).map((r) => r.text).join(" "), ev.currentTarget));
 $("rules-clear").addEventListener("click", () => { filterRules = []; saveRules(); });
 
-let filterTimer = null;
-filterInput.addEventListener("input", () => {
-  clearTimeout(filterTimer);
-  filterTimer = setTimeout(compileFilters, 120);
-});
-filterInput.addEventListener("keydown", (ev) => {
-  if (ev.key === "Enter" && filterInput.value.trim()) {
-    addRules(filterInput.value);
-    filterInput.value = "";
-    compileFilters();
-  }
-});
 
 browser.storage.local.get("filterRules").then(({ filterRules: saved }) => {
   if (Array.isArray(saved)) filterRules = saved.filter((r) => r && typeof r.text === "string").map((r) => ({ text: r.text, enabled: r.enabled !== false }));
