@@ -306,6 +306,35 @@ const Overview = (() => {
   canvas.addEventListener("dblclick", () => setRange(null));
   $("overview-clear").addEventListener("click", () => setRange(null));
   btn.addEventListener("click", () => setShown(!shown));
+
+  /* Height: drag the bottom edge; remembered. Double-click restores the default. */
+  const DEFAULT_H = 84, MIN_H = 40;
+  const maxH = () => Math.max(MIN_H, Math.round(window.innerHeight * 0.6));
+  const setHeight = (px, remember) => {
+    const hgt = Math.round(Math.min(maxH(), Math.max(MIN_H, px)));
+    wrap.style.height = hgt + "px";
+    if (remember) { try { localStorage.setItem("overviewHeight", String(hgt)); } catch { /* storage unavailable */ } }
+  };
+  try { const saved = Number(localStorage.getItem("overviewHeight")); if (saved) setHeight(saved, false); } catch { /* storage unavailable */ }
+  const resizer = $("overview-resizer");
+  resizer.addEventListener("mousedown", (ev) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const startY = ev.clientY, startH = wrap.offsetHeight;
+    resizer.classList.add("dragging");
+    document.body.classList.add("row-resizing");
+    const move = (e) => setHeight(startH + e.clientY - startY, false);
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      resizer.classList.remove("dragging");
+      document.body.classList.remove("row-resizing");
+      setHeight(wrap.offsetHeight, true);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
+  resizer.addEventListener("dblclick", () => setHeight(DEFAULT_H, true));
   new ResizeObserver(() => invalidate(true)).observe(canvas);
 
   let initial = false;
