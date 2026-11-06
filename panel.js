@@ -305,7 +305,15 @@ const filterHelpers = {
 };
 
 // Every filter except the overview's time range (the overview shows these).
+/* Results are remembered on each request summary until the filters change
+ * (filterGen). Summaries are replaced, never edited, when a request updates,
+ * so a new or changed request is always checked afresh. */
+let filterGen = 0;
 function matchesFilters(s) {
+  if (s._fGen !== filterGen) { s._fGen = filterGen; s._f = checkFilters(s); }
+  return s._f;
+}
+function checkFilters(s) {
   if (state.typeFilter !== "all" && category(s) !== state.typeFilter) return false;
   if (state.tabFilter === "current") { if (state.originTabId != null && s.tabId !== state.originTabId) return false; }
   else if (state.tabFilter === "none") { if (s.tabId >= 0) return false; }
@@ -327,6 +335,7 @@ function matches(s) {
 const overviewChanged = () => { if (typeof Overview !== "undefined") Overview.invalidate(); };
 
 function applyFilters() {
+  filterGen++;
   viewDirty = true;
   scheduleRefresh();
   overviewChanged();
@@ -612,6 +621,12 @@ function scheduleRefresh() {
 listPane.addEventListener("scroll", () => scheduleRefresh(), { passive: true });
 window.addEventListener("resize", () => scheduleRefresh());
 
+// Writes a value only when it changed: DOM writes, even of the same value,
+// make the browser restyle and lay out again.
+function setIfChanged(obj, key, value) { if (obj[key] !== value) obj[key] = value; }
+let rowHVerified = false; // the real row height has been measured
+window.addEventListener("resize", () => { rowHVerified = false; }); // zoom can change it
+
 function renderRows(t0, span, now) {
   const headH = tbody.parentElement.tHead.offsetHeight;
   const viewportRows = Math.ceil(Math.max(0, listPane.clientHeight - headH) / rowH);
@@ -645,7 +660,7 @@ function renderRows(t0, span, now) {
     tr.classList.toggle("cursor", id === state.cursorId && id !== state.selectedId);
     const node = treeInfo && treeInfo.get(id);
     const fileCell = tr.children[3];
-    fileCell.style.paddingLeft = node ? 4 + node.depth * TREE_INDENT + "px" : "";
+    setIfChanged(fileCell.style, "paddingLeft", node ? 4 + node.depth * TREE_INDENT + "px" : "");
     const twisty = fileCell.firstChild;
     twisty.classList.toggle("hl", node != null && id === treeGuideHover);
     // Tree lines: one per ancestor, under its arrow; they join up row to row.
@@ -659,29 +674,39 @@ function renderRows(t0, span, now) {
         return g;
       }));
     }
-    twisty.textContent = node && node.kids ? (collapsed.has(id) ? "▸" : "▾") : "";
-    twisty.title = node && node.kids ? `${node.kids} request${node.kids === 1 ? "" : "s"} started by this one. Alt+click for everything below.` : "";
+    setIfChanged(twisty, "textContent", node && node.kids ? (collapsed.has(id) ? "▸" : "▾") : "");
+    setIfChanged(twisty, "title", node && node.kids ? `${node.kids} request${node.kids === 1 ? "" : "s"} started by this one. Alt+click for everything below.` : "");
     tr.classList.toggle("context", !!(node && node.context));
     // Waterfall bar
     const bar = tr.lastChild.firstChild;
     const end = s.end ?? now;
     const dur = Math.max(1, end - s.start);
-    bar.style.left = ((s.start - t0) / span) * 100 + "%";
-    bar.style.width = Math.max(0.15, (dur / span) * 100) + "%";
+    // Rounded to 0.01%, so tiny changes in the time span don't rewrite every bar.
+    const pct = (v) => Math.round(v * 10000) / 100 + "%";
+    setIfChanged(bar.style, "left", pct((s.start - t0) / span));
+    setIfChanged(bar.style, "width", pct(Math.max(0.0015, dur / span)));
     const waitFrac = s.firstByte ? Math.min(1, Math.max(0, (s.firstByte - s.start) / dur)) : 1;
-    bar.firstChild.style.width = waitFrac * 100 + "%";
+    setIfChanged(bar.firstChild.style, "width", pct(waitFrac));
     bar.classList.toggle("pending", s.state === "pending");
     list.push(tr);
   }
-  topPad.firstChild.style.height = first * rowH + "px";
-  bottomPad.firstChild.style.height = (view.length - last) * rowH + "px";
-  topPad.hidden = !first;
-  bottomPad.hidden = last >= view.length;
-  tbody.replaceChildren(topPad, ...list, bottomPad);
+  setIfChanged(topPad.firstChild.style, "height", first * rowH + "px");
+  setIfChanged(bottomPad.firstChild.style, "height", (view.length - last) * rowH + "px");
+  setIfChanged(topPad, "hidden", !first);
+  setIfChanged(bottomPad, "hidden", last >= view.length);
+  // Put the rows in order, moving only those out of place (most stay put).
+  let node = tbody.firstChild;
+  for (const el of [topPad, ...list, bottomPad]) {
+    if (node === el) { node = node.nextSibling; continue; }
+    tbody.insertBefore(el, node);
+  }
+  while (node) { const next = node.nextSibling; node.remove(); node = next; }
 
-  if (list.length) {
+  // Measuring forces a layout, so only until the real row height is known.
+  if (list.length && !rowHVerified) {
     const h0 = list[0].getBoundingClientRect().height;
     if (h0 && Math.abs(h0 - rowH) > 0.5) { rowH = h0; scheduleRefresh(); }
+    else if (h0) rowHVerified = true;
   }
   if (stickPending) { stickPending = false; listPane.scrollTop = maxTop; }
 }
@@ -769,13 +794,16 @@ function applyBatch(list, removed) {
 
   let selectedChanged = false;
   for (const s of list) {
-    const isNew = !store.has(s.id);
+    const prev = store.get(s.id);
+    const isNew = !prev;
     store.set(s.id, s);
     if (s.tabId >= 0 && !tabTitles.has(s.tabId)) tabsDirty = true;
     if (!viewDirty) {
       const shown = matches(s);
       if (state.viewMode === "tree") {
-        if (isNew || shown !== viewPos.has(s.id) || s.initiator) viewDirty = true;
+        // Only changes that can move a request in the tree rebuild it.
+        if (isNew || shown !== viewPos.has(s.id) || prev.initiator !== s.initiator ||
+            prev.redirectedFrom !== s.redirectedFrom || prev.state !== s.state || prev.url !== s.url) viewDirty = true;
       } else if (isNew && shown && !state.sortKey) {
         viewPos.set(s.id, view.length); // ids only grow, so new requests go last
         view.push(s.id);
@@ -795,7 +823,10 @@ function applyBatch(list, removed) {
 function applySettings(st) {
   const blockersChanged = String(st.blockers || []) !== String(state.blockers);
   state.blockers = st.blockers || [];
-  if (blockersChanged) for (const tr of rendered.values()) tr._rev = null; // relabel blocked rows
+  if (blockersChanged) {
+    for (const tr of rendered.values()) tr._rev = null; // relabel blocked rows
+    filterGen++; // is:blocked depends on which add-ons can block
+  }
   state.recording = st.recording;
   state.captureBodies = st.captureBodies;
   recordBtn.classList.toggle("paused", !st.recording);

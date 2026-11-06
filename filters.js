@@ -71,14 +71,16 @@ const NetFilter = (() => {
     const { key, value } = t;
     if (value == null) return false;               // e.g. size:abc
     if (typeof value === "string" && !value) return true; // "domain:" alone shows everything
-    const url = (() => { try { return new URL(s.url); } catch { return null; } })();
+    // Parsed only for the keys that need it (domain, scheme, set-cookie-domain).
+    let parsed;
+    const getUrl = () => (parsed !== undefined ? parsed : (parsed = (() => { try { return new URL(s.url); } catch { return null; } })()));
     let m;
     switch (key) {
       case "status-code": m = s.status != null && String(s.status).startsWith(value); break;
       case "method": m = s.method.toLowerCase() === value; break;
       case "protocol": m = (s.httpVersion || "").toLowerCase().includes(value); break;
-      case "domain": m = !!url && url.host.toLowerCase().includes(value); break;
-      case "scheme": m = !!url && url.protocol.slice(0, -1) === value; break;
+      case "domain": { const url = getUrl(); m = !!url && url.host.toLowerCase().includes(value); break; }
+      case "scheme": { const url = getUrl(); m = !!url && url.protocol.slice(0, -1) === value; break; }
       case "remote-ip": m = (s.ip || "").toLowerCase().includes(value); break;
       case "cause": m = h.cause(s).toLowerCase().includes(value); break;
       case "initiator": m = h.initiator(s).toLowerCase().includes(value); break;
@@ -91,7 +93,7 @@ const NetFilter = (() => {
       case "has-response-header": m = (s.responseHeaderNames || []).includes(value); break;
       case "set-cookie-name": m = (s.setCookies || []).some((c) => c.name.toLowerCase().includes(value)); break;
       case "set-cookie-value": m = (s.setCookies || []).some((c) => c.value.toLowerCase().includes(value)); break;
-      case "set-cookie-domain": m = (s.setCookies || []).some((c) => (c.domain || (url ? url.host : "")).includes(value)); break;
+      case "set-cookie-domain": m = (s.setCookies || []).some((c) => (c.domain || (getUrl() ? getUrl().host : "")).includes(value)); break;
       case "regexp": try { m = new RegExp(value).test(s.url); } catch { m = false; } break;
       case "priority": m = false; break;           // Firefox doesn't give extensions request priorities
       case "is":
