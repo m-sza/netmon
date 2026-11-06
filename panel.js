@@ -35,6 +35,7 @@ const state = {
   sortKey: null,
   sortDir: 1,
   selectedId: null,
+  cursorId: null,          // the row the keyboard is on; Enter/Space opens it
   detailsTab: "headers",
   rawHeaders: false,
   rawJson: false,
@@ -613,6 +614,7 @@ function renderRows(t0, span, now) {
     }
     tr.classList.toggle("alt", i % 2 === 1);
     tr.classList.toggle("selected", id === state.selectedId);
+    tr.classList.toggle("cursor", id === state.cursorId && id !== state.selectedId);
     const node = treeInfo && treeInfo.get(id);
     const fileCell = tr.children[3];
     fileCell.style.paddingLeft = node ? 4 + node.depth * 14 + "px" : "";
@@ -1243,6 +1245,12 @@ tbody.addEventListener("click", (ev) => {
   select(Number(tr.dataset.id));
 });
 
+function moveCursor(id) {
+  state.cursorId = id;
+  if (viewPos.has(id)) revealIndex(viewPos.get(id));
+  scheduleRefresh();
+}
+
 // Scrolls just enough to bring row `i` of the view into sight.
 function revealIndex(i) {
   const headH = tbody.parentElement.tHead.offsetHeight;
@@ -1255,6 +1263,7 @@ function revealIndex(i) {
 function select(id) {
   if (!store.has(id)) return;
   state.selectedId = id;
+  state.cursorId = id;
   if (viewPos.has(id)) revealIndex(viewPos.get(id));
   detailsPane.hidden = false;
   splitter.hidden = false;
@@ -1265,6 +1274,7 @@ function select(id) {
 
 function closeDetails() {
   if (state.selectedId != null) scheduleRefresh();
+  if (state.selectedId != null) state.cursorId = state.selectedId; // the keyboard carries on from there
   state.selectedId = null;
   current = null;
   detailsToken++;
@@ -1311,16 +1321,23 @@ document.addEventListener("keydown", async (ev) => {
 document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, select, textarea") || document.querySelector("dialog[open]")) return;
   if (ev.key === "Escape") { closeDetails(); return; }
-  if ((ev.key === "ArrowLeft" || ev.key === "ArrowRight") && state.viewMode === "tree" && state.selectedId != null) {
-    const node = treeInfo && treeInfo.get(state.selectedId);
-    if (node && node.kids && collapsed.has(state.selectedId) === (ev.key === "ArrowRight")) {
+  const cursor = state.cursorId != null && viewPos.has(state.cursorId) ? state.cursorId : state.selectedId;
+  // Enter / Space open the row the keyboard is on (buttons keep their own Enter/Space).
+  if ((ev.key === "Enter" || ev.key === " ") && !ev.target.closest("button, a, label, summary, [contenteditable]")) {
+    if (cursor != null && viewPos.has(cursor)) { ev.preventDefault(); select(cursor); }
+    return;
+  }
+  if ((ev.key === "ArrowLeft" || ev.key === "ArrowRight") && state.viewMode === "tree" && cursor != null) {
+    const node = treeInfo && treeInfo.get(cursor);
+    if (node && node.kids && collapsed.has(cursor) === (ev.key === "ArrowRight")) {
       ev.preventDefault();
-      toggleCollapsed(state.selectedId, false);
+      toggleCollapsed(cursor, false);
     }
     return;
   }
   // Up/Down: one row. PageUp/PageDown: a screenful, keeping one row of overlap.
-  // Home/End: first/last row.
+  // Home/End: first/last row. These move the keyboard cursor; they don't open
+  // the details pane. While it is open, it follows the cursor.
   const NAV = ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End"];
   if (!NAV.includes(ev.key)) return;
   ev.preventDefault();
@@ -1328,14 +1345,16 @@ document.addEventListener("keydown", (ev) => {
   if (!view.length) return;
   const headH = tbody.parentElement.tHead.offsetHeight;
   const page = Math.max(1, Math.floor((listPane.clientHeight - headH) / rowH) - 1);
-  const at = viewPos.get(state.selectedId);
+  const at = cursor != null ? viewPos.get(cursor) : undefined;
   const step = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page }[ev.key];
   let i;
   if (ev.key === "Home") i = 0;
   else if (ev.key === "End") i = view.length - 1;
   else if (at == null) i = step > 0 ? 0 : view.length - 1;
   else i = Math.min(view.length - 1, Math.max(0, at + step));
-  if (i !== at) select(view[i]);
+  if (i === at) return;
+  if (state.selectedId != null) select(view[i]);
+  else moveCursor(view[i]);
 });
 
 /* Column resizing: dragging a header's right edge moves the border between it
