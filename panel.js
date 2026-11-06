@@ -1332,6 +1332,31 @@ tbody.addEventListener("click", (ev) => {
   select(Number(tr.dataset.id));
 });
 
+/* A short eased scroll of the details pane, so the eye can follow the text.
+ * Presses during an animation add to its target instead of restarting from
+ * where it happens to be, so fast or held keys still cover the full distance. */
+let detailsScroll = null; // { from, to, start, dur }
+function smoothScrollDetails(delta, dur) {
+  const max = detailsBody.scrollHeight - detailsBody.clientHeight;
+  const base = detailsScroll ? detailsScroll.to : detailsBody.scrollTop;
+  const to = Math.max(0, Math.min(max, base + delta));
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { detailsScroll = null; detailsBody.scrollTop = to; return; }
+  const running = !!detailsScroll;
+  detailsScroll = { from: detailsBody.scrollTop, to, start: performance.now(), dur };
+  if (running) return;
+  const step = (now) => {
+    const a = detailsScroll;
+    if (!a) return;
+    const t = Math.min(1, (now - a.start) / a.dur);
+    const eased = 1 - (1 - t) ** 3; // ease-out
+    detailsBody.scrollTop = a.from + (a.to - a.from) * eased;
+    if (t < 1) requestAnimationFrame(step);
+    else detailsScroll = null;
+  };
+  requestAnimationFrame(step);
+}
+detailsBody.addEventListener("wheel", () => { detailsScroll = null; }, { passive: true });
+
 // Moves the keyboard to a row: the open details follow it; otherwise only the cursor moves.
 function goToRow(id) {
   if (state.selectedId != null) select(id);
@@ -1373,6 +1398,7 @@ function revealIndex(i) {
 
 function select(id) {
   if (!store.has(id)) return;
+  detailsScroll = null; // a scroll animation belongs to the request it started on
   state.selectedId = id;
   state.cursorId = id;
   if (viewPos.has(id)) revealIndex(viewPos.get(id));
@@ -1457,9 +1483,10 @@ document.addEventListener("keydown", (ev) => {
       ev.preventDefault();
       const by = SCROLL[ev.key];
       const page = Math.max(40, detailsBody.clientHeight - 40);
-      if (by === "top") detailsBody.scrollTop = 0;
-      else if (by === "bottom") detailsBody.scrollTop = detailsBody.scrollHeight;
-      else detailsBody.scrollBy({ top: by === "page" ? page : by === "-page" ? -page : by });
+      if (by === "top") smoothScrollDetails(-Infinity, 200);
+      else if (by === "bottom") smoothScrollDetails(Infinity, 200);
+      else if (typeof by === "string") smoothScrollDetails(by === "page" ? page : -page, 200);
+      else smoothScrollDetails(by, 120);
       return;
     }
   }
