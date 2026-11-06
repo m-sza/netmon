@@ -24,7 +24,8 @@ const Overview = (() => {
   const chipText = $("overview-range-text");
 
   const RULER_H = 16;
-  const MAX_LANE_H = 6;
+  const MAX_LANE_H = 6;          // at the default height; scales with the overview's height
+  const BASE_H = 84;
   const MIN_BAR_W = 3;
   const MAX_LANES = 64;          // more overlap than this shares lanes
   const DATA_INTERVAL = 200;     // ms between redraws of the bars: 5 per second
@@ -168,9 +169,12 @@ const Overview = (() => {
       laneEnds[lane] = x1;
       lanes[i] = lane;
     }
+    // Bars get thicker as the overview is made taller (and thinner when many overlap).
     const area = hgt - RULER_H - 6;
-    const laneH = Math.max(1, Math.min(MAX_LANE_H, area / laneEnds.length));
-    const barH = laneH >= 3 ? laneH - 2 : laneH;
+    const maxLane = MAX_LANE_H * Math.max(1, hgt / BASE_H);
+    const laneH = Math.max(1, Math.min(maxLane, area / laneEnds.length));
+    const gap = laneH >= 3 ? Math.max(1, Math.round(laneH / 3)) : 0;
+    const barH = laneH - gap;
     // Grouped by color and opacity, so the canvas state changes rarely.
     const runs = new Map(); // "kind|alpha" -> flat [x, y, w, ...]
     const push = (key, x0, y, bw) => { let r = runs.get(key); if (!r) runs.set(key, (r = [])); r.push(x0, y, bw); };
