@@ -1482,7 +1482,7 @@ document.addEventListener("keydown", (ev) => {
     else toast(ev.key === "ArrowUp" ? "This request has no parent in the list" : "No higher-level request below");
     return;
   }
-  // Up/Down: one row. PageUp/PageDown: a screenful, keeping one row of overlap.
+  // Up/Down: one row. PageUp/PageDown: 10 rows.
   // Home/End: first/last row. These move the keyboard cursor; they don't open
   // the details pane. While it is open, it follows the cursor.
   const NAV = ["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End"];
@@ -1490,8 +1490,7 @@ document.addEventListener("keydown", (ev) => {
   ev.preventDefault();
   if (viewDirty) rebuildView();
   if (!view.length) return;
-  const headH = tbody.parentElement.tHead.offsetHeight;
-  const page = Math.max(1, Math.floor((listPane.clientHeight - headH) / rowH) - 1);
+  const page = 10;
   const at = cursor != null ? viewPos.get(cursor) : undefined;
   const step = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page }[ev.key];
   let i;
