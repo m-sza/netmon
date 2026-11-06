@@ -1322,10 +1322,35 @@ document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, select, textarea") || document.querySelector("dialog[open]")) return;
   if (ev.key === "Escape") { closeDetails(); return; }
   const cursor = state.cursorId != null && viewPos.has(state.cursorId) ? state.cursorId : state.selectedId;
-  // Enter / Space open the row the keyboard is on (buttons keep their own Enter/Space).
+  const open = state.selectedId != null;
+  // Enter / Space open the row the keyboard is on, and close it again, like
+  // Escape (buttons keep their own Enter/Space).
   if ((ev.key === "Enter" || ev.key === " ") && !ev.target.closest("button, a, label, summary, [contenteditable]")) {
-    if (cursor != null && viewPos.has(cursor)) { ev.preventDefault(); select(cursor); }
+    ev.preventDefault();
+    if (open && (cursor === state.selectedId || cursor == null)) closeDetails();
+    else if (cursor != null && viewPos.has(cursor)) select(cursor);
     return;
+  }
+  if (open) {
+    // Tab / Shift+Tab and Shift+Right / Shift+Left: next / previous details tab.
+    const tabKey = ev.key === "Tab" && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+    const arrowKey = (ev.key === "ArrowRight" || ev.key === "ArrowLeft") && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+    if (tabKey || arrowKey) {
+      ev.preventDefault();
+      stepDetailsTab(tabKey ? (ev.shiftKey ? -1 : 1) : ev.key === "ArrowRight" ? 1 : -1);
+      return;
+    }
+    // Shift + Up/Down, Page Up/Down, Home/End scroll the details pane.
+    const SCROLL = { ArrowDown: 40, ArrowUp: -40, PageDown: "page", PageUp: "-page", Home: "top", End: "bottom" };
+    if (ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey && ev.key in SCROLL) {
+      ev.preventDefault();
+      const by = SCROLL[ev.key];
+      const page = Math.max(40, detailsBody.clientHeight - 40);
+      if (by === "top") detailsBody.scrollTop = 0;
+      else if (by === "bottom") detailsBody.scrollTop = detailsBody.scrollHeight;
+      else detailsBody.scrollBy({ top: by === "page" ? page : by === "-page" ? -page : by });
+      return;
+    }
   }
   if ((ev.key === "ArrowLeft" || ev.key === "ArrowRight") && state.viewMode === "tree" && cursor != null) {
     const node = treeInfo && treeInfo.get(cursor);
@@ -1442,6 +1467,17 @@ document.addEventListener("keydown", (ev) => {
 /* ---------------------------------------------------------------------------
  * Details pane
  * ------------------------------------------------------------------------- */
+// Moves to the next (1) or previous (-1) details tab that applies, wrapping.
+function stepDetailsTab(dir) {
+  const btns = [...document.querySelectorAll("#details-tabs button[data-tab]")].filter((b) => !b.hidden);
+  if (!btns.length) return;
+  const i = btns.findIndex((b) => b.classList.contains("active"));
+  btns[(i + dir + btns.length) % btns.length].click();
+}
+// A click on a details tab doesn't leave focus on it, so Enter/Space/arrows
+// keep working on the list.
+$("details-tabs").addEventListener("mousedown", (ev) => { if (ev.target.closest("button[data-tab]")) ev.preventDefault(); });
+
 $("details-tabs").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-tab]");
   if (!btn) return;
