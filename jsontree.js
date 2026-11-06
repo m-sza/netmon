@@ -166,6 +166,29 @@ const JsonTree = (() => {
     return out.startsWith(".") ? out.slice(1) : out;
   }
 
+  // The keys (object members) and indexes (array items) from the top down to ctx.
+  function keysOf(ctx) {
+    const out = [];
+    for (let c = ctx; c && c.parent; c = c.parent) out.unshift(c.key != null ? JSON.parse(c.key) : c.index);
+    return out;
+  }
+  // The line at those keys, opening the sections on the way; null if this
+  // JSON has nothing there.
+  function lineAt(root, keys) {
+    let node = root;
+    const chain = [root];
+    for (const k of keys) {
+      if (!node.kids) return null;
+      const i = node.t === "arr"
+        ? (typeof k === "number" && k < node.kids.length ? k : -1)
+        : node.kids.findIndex(([rk]) => JSON.parse(rk) === k);
+      if (i < 0) return null;
+      node = node.kids[i][1];
+      chain.push(node);
+    }
+    return lineOf({ chain }, true);
+  }
+
   /* What a right-click hit: the value on that line (a closing bracket counts
    * as its section). Null outside a value. */
   function entryAt(target) {
@@ -187,6 +210,7 @@ const JsonTree = (() => {
       parentKind: ctx.parent ? (ctx.parent.node.t === "obj" ? "object" : "array") : null,
       // As a JSON fragment: "key": value inside an object, else just the value.
       row: () => (ctx.key != null ? `${ctx.key}: ` : "") + serialize(ctx.node),
+      keys: keysOf(ctx),
       path: ctx.parent ? path(ctx) : null,
       pythonPath: ctx.parent ? path(ctx, true) : null,
     };
@@ -274,6 +298,7 @@ const JsonTree = (() => {
       el: wrap, entryAt, step,
       find: (re, limit) => find(root, re, limit),
       lineOf,
+      lineAt: (keys) => lineAt(root, keys),
       expandAll: () => all(true),
       collapseAll: () => { all(false); if (top.classList.contains("jt-node")) setOpen(top, true, false); },
     };

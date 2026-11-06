@@ -1614,14 +1614,6 @@ document.addEventListener("keydown", (ev) => {
       if (ev.key in MOVE) { ev.preventDefault(); moveDetailsCursor(MOVE[ev.key]); return; }
       if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { ev.preventDefault(); stepDetailsCursor(ev.key === "ArrowRight" ? 1 : -1); return; }
     }
-    // Alt+Page Up/Down: the highlight 10 rows up / down. (Ctrl+Shift+Page
-    // Up/Down would fit better, but Firefox and Chrome keep those for moving
-    // tabs and never pass them to the page.)
-    if (ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && (ev.key === "PageDown" || ev.key === "PageUp")) {
-      ev.preventDefault();
-      moveDetailsCursor(ev.key === "PageDown" ? 10 : -10);
-      return;
-    }
     // Letters by what they type, or by their key on layouts without Latin letters.
     const letter = /^[a-z]$/i.test(ev.key) ? ev.key.toLowerCase() : /^Key[A-Z]$/.test(ev.code) ? ev.code.slice(3).toLowerCase() : null;
     // Copying from the highlighted row: Ctrl+C the row (unless text is
@@ -1843,7 +1835,9 @@ function revokeBlobs() {
 
 function renderDetails(keepScroll) {
   const scroll = detailsBody.scrollTop;
-  const cursorAt = keepScroll && hasDetailsCursor() ? detailLines().indexOf(detailsCursor) : -1;
+  // Where the highlighted row sits, so the same row of the next request can
+  // land in the same place (see stickyRows).
+  const cursorTop = hasDetailsCursor() ? detailsCursor.getBoundingClientRect().top - detailsBody.getBoundingClientRect().top : null;
   detailsCursor = null;
   clearFindHighlights();
   revokeBlobs();
@@ -1864,7 +1858,12 @@ function renderDetails(keepScroll) {
   const render = { headers: renderHeaders, cookies: renderCookies, request: renderRequest, response: renderResponse, timings: renderTimings, security: renderSecurity, messages: renderMessages }[state.detailsTab];
   detailsBody.append(...[].concat(render(current)).filter(Boolean));
   if (keepScroll) detailsBody.scrollTop = scroll;
-  if (cursorAt >= 0) { const lines = detailLines(); if (lines.length) setDetailsCursor(lines[Math.min(cursorAt, lines.length - 1)], false); }
+  const sticky = stickyRows.get(state.detailsTab);
+  const again = sticky ? findStickyRow(sticky) : null;
+  if (again) {
+    setDetailsCursor(again, cursorTop == null && !keepScroll);
+    if (!keepScroll && cursorTop != null) detailsBody.scrollTop += again.getBoundingClientRect().top - detailsBody.getBoundingClientRect().top - cursorTop;
+  }
 }
 
 function note(text, cls) {
@@ -2480,6 +2479,36 @@ function createFinder(pre, tree, mode, toSource) {
 /* The highlighted row of the details pane (Ctrl+Shift+Up/Down, or a click):
  * a key/value row, or a line of a JSON tree. C, K and P copy from it. */
 let detailsCursor = null;
+/* What the highlighted row is, so it stays highlighted when moving to another
+ * request (to compare): the same header, cookie or parameter name (the nth of
+ * that name, in the same section), or the same JSON path. It survives
+ * requests that lack that row; Esc forgets it. One per details tab. */
+const stickyRows = new Map(); // details tab -> row identity
+function rowIdentity(el) {
+  if (el.tagName === "TR") {
+    const table = el.closest("table");
+    const sec = el.closest("details.section");
+    const name = kvRows.get(el).name;
+    const same = [...table.rows].filter((r) => kvRows.has(r) && kvRows.get(r).name === name);
+    return { section: sec ? sec.querySelector("summary").firstChild.textContent : "", name, nth: same.indexOf(el) };
+  }
+  const trees = [...detailsBody.querySelectorAll(".jtree")];
+  const treeEl = el.closest(".jtree");
+  const e = jsonTrees.get(treeEl).entryAt(el);
+  return e && { tree: trees.indexOf(treeEl), keys: e.keys };
+}
+function findStickyRow(id) {
+  if (id.keys) {
+    const treeEl = detailsBody.querySelectorAll(".jtree")[id.tree];
+    if (!treeEl || !treeEl.getClientRects().length) return null;
+    return jsonTrees.get(treeEl).lineAt(id.keys);
+  }
+  return detailLines().find((el) => {
+    if (el.tagName !== "TR") return false;
+    const r = rowIdentity(el);
+    return r.section === id.section && r.name === id.name && r.nth === id.nth;
+  }) || null;
+}
 const DETAIL_LINES = "table.kv tr, .jtree .jt-line:not(.jt-close)";
 function detailLines() {
   return [...detailsBody.querySelectorAll(DETAIL_LINES)].filter((el) => (el.tagName !== "TR" || kvRows.has(el)) && el.getClientRects().length);
@@ -2487,12 +2516,14 @@ function detailLines() {
 function setDetailsCursor(el, reveal) {
   if (detailsCursor) detailsCursor.classList.remove("dcursor");
   detailsCursor = el;
+  if (el) stickyRows.set(state.detailsTab, rowIdentity(el));
+  else stickyRows.delete(state.detailsTab);
   if (!el) return;
   el.classList.add("dcursor");
   if (reveal) revealInDetails(el.getBoundingClientRect(), false);
 }
 const hasDetailsCursor = () => !!detailsCursor && detailsCursor.isConnected && detailsCursor.getClientRects().length > 0;
-// how: a number of rows down (+) or up (-), "first" or "last". Without a highlighted
+// how: +1 / -1 (a row down / up), "first" or "last". Without a highlighted
 // row, it starts from the rows in view.
 function moveDetailsCursor(how) {
   const lines = detailLines();
@@ -2505,7 +2536,6 @@ function moveDetailsCursor(how) {
     const inView = lines.filter((l) => { const r = l.getBoundingClientRect(); return r.bottom > box.top && r.top < box.bottom; });
     const start = how > 0 ? inView[0] : inView[inView.length - 1];
     i = start ? lines.indexOf(start) : how > 0 ? 0 : lines.length - 1;
-    if (Math.abs(how) > 1) i = Math.max(0, Math.min(lines.length - 1, i + how));
   } else i = Math.max(0, Math.min(lines.length - 1, i + how));
   setDetailsCursor(lines[i], true);
 }
