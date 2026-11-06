@@ -1257,6 +1257,37 @@ function closeDetails() {
 
 $("btn-close-details").addEventListener("click", closeDetails);
 
+/* Ctrl+R / F5 (Cmd+R on macOS) reload the inspected tab, not the monitor, as
+ * in DevTools; with Shift they bypass the cache. The inspected tab is the one
+ * picked in the tab dropdown, or the tab the monitor was opened from. Works
+ * from any focused control. */
+function inspectedTabId() {
+  const f = state.tabFilter;
+  if (/^\d+$/.test(f)) return Number(f);
+  return state.originTabId;
+}
+document.addEventListener("keydown", async (ev) => {
+  const accel = ev.ctrlKey || ev.metaKey;
+  const reload = (ev.key === "F5" && !accel && !ev.altKey) || (accel && !ev.altKey && (ev.key === "r" || ev.key === "R"));
+  if (!reload) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (ev.repeat) return;
+  const id = inspectedTabId();
+  const t = id != null ? tabTitles.get(id) : null;
+  if (id == null || !t || t.closed) {
+    toast(id == null ? "No tab to reload: pick one in the tab dropdown" : "That tab is closed");
+    return;
+  }
+  const bypassCache = ev.shiftKey;
+  try {
+    await browser.tabs.reload(id, { bypassCache });
+    toast(`${bypassCache ? "Hard reloading" : "Reloading"} “${tabTitleOf(t, id)}”`);
+  } catch (err) {
+    toast(`Couldn't reload the tab: ${err.message || err}`);
+  }
+}, true);
+
 document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, select, textarea") || document.querySelector("dialog[open]")) return;
   if (ev.key === "Escape") { closeDetails(); return; }
