@@ -261,6 +261,80 @@ function failure(s) {
 const isBlockedFailure = (s) => s.blocked || (ADDON_BLOCK_CODES.has(s.error) && (state.blockers.length > 0 || s.error !== "NS_ERROR_ABORT")) ||
   /^Blocked/.test(FAILURES[s.error]?.[0] || "");
 
+/* HTTP status codes: the standard name (HTTP/2 and HTTP/3 send no reason
+ * phrase, so this fills it in) and a plain explanation. */
+const STATUS = {
+  100: ["Continue", "The server got the request headers; the client can send the body."],
+  101: ["Switching Protocols", "The server switched to the protocol the client asked for, e.g. WebSocket."],
+  103: ["Early Hints", "Preliminary headers, so the browser can start loading resources early."],
+  200: ["OK", "The request succeeded."],
+  201: ["Created", "The request succeeded and created a new resource."],
+  202: ["Accepted", "The request was accepted for processing, which hasn't finished."],
+  203: ["Non-Authoritative Information", "Succeeded, but a proxy changed the response."],
+  204: ["No Content", "The request succeeded; there is no body to send."],
+  205: ["Reset Content", "The request succeeded; the client should reset the form or view."],
+  206: ["Partial Content", "Only the requested range of the resource was sent (e.g. for media or resumed downloads)."],
+  207: ["Multi-Status", "WebDAV: the body holds a status for each of several resources."],
+  300: ["Multiple Choices", "There are several versions of the resource to choose from."],
+  301: ["Moved Permanently", "The resource has a new permanent URL (in Location); browsers remember this."],
+  302: ["Found", "Temporary redirect to the URL in Location."],
+  303: ["See Other", "Redirect to the URL in Location, to be fetched with GET (usually after a form POST)."],
+  304: ["Not Modified", "The cached copy is still valid, so no body was sent; the browser used its cache."],
+  307: ["Temporary Redirect", "Temporary redirect to the URL in Location, keeping the method and body."],
+  308: ["Permanent Redirect", "Permanent redirect to the URL in Location, keeping the method and body."],
+  400: ["Bad Request", "The server couldn't understand the request (malformed syntax or invalid data)."],
+  401: ["Unauthorized", "Authentication is needed, or the credentials sent were rejected."],
+  402: ["Payment Required", "Payment is needed; rarely used, meaning varies by service."],
+  403: ["Forbidden", "The server understood the request but refuses it; logging in won't help."],
+  404: ["Not Found", "Nothing exists at this URL."],
+  405: ["Method Not Allowed", "This URL doesn't accept this method (see the Allow header)."],
+  406: ["Not Acceptable", "No version of the resource matches the request's Accept headers."],
+  407: ["Proxy Authentication Required", "A proxy between you and the server needs credentials."],
+  408: ["Request Timeout", "The server gave up waiting for the request."],
+  409: ["Conflict", "The request conflicts with the resource's current state (e.g. an edit conflict)."],
+  410: ["Gone", "The resource was here but has been removed for good."],
+  411: ["Length Required", "The server needs a Content-Length header."],
+  412: ["Precondition Failed", "A condition in the request headers (e.g. If-Match) wasn't met."],
+  413: ["Content Too Large", "The request body is bigger than the server accepts."],
+  414: ["URI Too Long", "The URL is longer than the server accepts."],
+  415: ["Unsupported Media Type", "The server doesn't accept the request body's format (Content-Type)."],
+  416: ["Range Not Satisfiable", "The requested range lies outside the resource."],
+  417: ["Expectation Failed", "The server can't meet the Expect header."],
+  418: ["I'm a teapot", "A joke code (RFC 2324), sometimes used to refuse requests."],
+  421: ["Misdirected Request", "The request reached a server that can't answer for this host."],
+  422: ["Unprocessable Content", "The request is well-formed but its data is invalid (often validation errors)."],
+  423: ["Locked", "WebDAV: the resource is locked."],
+  425: ["Too Early", "The server won't risk processing a request that might be replayed."],
+  426: ["Upgrade Required", "The client must switch to another protocol (see the Upgrade header)."],
+  428: ["Precondition Required", "The server needs a conditional request (e.g. with If-Match)."],
+  429: ["Too Many Requests", "Rate limited: too many requests in a given time (see Retry-After)."],
+  431: ["Request Header Fields Too Large", "The headers (often the cookies) are too large."],
+  451: ["Unavailable For Legal Reasons", "Blocked for legal reasons, such as a court order or censorship."],
+  500: ["Internal Server Error", "The server hit an error it didn't handle."],
+  501: ["Not Implemented", "The server doesn't support what the request needs."],
+  502: ["Bad Gateway", "A gateway or proxy got an invalid response from the server behind it."],
+  503: ["Service Unavailable", "The server is overloaded or down for maintenance (see Retry-After)."],
+  504: ["Gateway Timeout", "A gateway or proxy didn't get a response in time from the server behind it."],
+  505: ["HTTP Version Not Supported", "The server doesn't support the request's HTTP version."],
+  507: ["Insufficient Storage", "The server can't store what's needed to complete the request."],
+  508: ["Loop Detected", "WebDAV: the server found an infinite loop."],
+  511: ["Network Authentication Required", "You need to log in to the network first (e.g. a Wi-Fi captive portal)."],
+};
+const STATUS_CLASS = {
+  1: "Informational: the request goes on.",
+  2: "Success.",
+  3: "Redirection: the client has to do something more, usually follow a new URL.",
+  4: "Client error: something about the request is wrong.",
+  5: "Server error: the server failed to handle a valid request.",
+};
+// { name, text }: the reason phrase (as sent, else the standard one) and an explanation.
+function statusInfo(s) {
+  const known = STATUS[s.status];
+  const name = s.statusText || (known ? known[0] : "");
+  const text = known ? known[1] : STATUS_CLASS[Math.floor(s.status / 100)] || "Not a standard HTTP status.";
+  return { name, text };
+}
+
 function statusClass(s) {
   if (s.state === "pending" && s.status == null) return "st-pending";
   if (s.status == null) return "st-error";
@@ -363,7 +437,10 @@ function fillRow(tr, s) {
 
   cStatus.textContent = s.status ?? "";
   cStatus.className = "c-status " + statusClass(s);
-  cStatus.title = s.status != null ? `${s.status} ${s.statusText || ""}`.trim() : s.state === "pending" ? "Pending" : (s.error || "");
+  if (s.status != null) {
+    const st = statusInfo(s);
+    setIfChanged(cStatus, "title", `${s.status} ${st.name}`.trim() + `\n${st.text}`);
+  } else setIfChanged(cStatus, "title", s.state === "pending" ? "Pending" : (s.error || ""));
 
   cMethod.textContent = s.method;
 
@@ -1787,9 +1864,9 @@ const kvRows = new WeakMap(); // row -> { kind, name, value }
 const textOf = (v) => (v == null ? "" : v instanceof Node ? v.textContent : String(v));
 function kvTable(pairs, data) {
   return h("table", { class: "kv" + (data ? " data" : "") },
-    h("tbody", null, pairs.map(([k, v]) => {
+    h("tbody", null, pairs.map(([k, v, copyAs]) => { // copyAs: the value to copy, when not the shown text
       const tr = h("tr", null, h("td", { class: "k" }, k), h("td", null, v));
-      kvRows.set(tr, { kind: data || "fact", name: textOf(k), value: textOf(v) });
+      kvRows.set(tr, { kind: data || "fact", name: textOf(k), value: copyAs ?? textOf(v) });
       return tr;
     })));
 }
@@ -1837,15 +1914,16 @@ function causedBy(d) {
 
 /* Headers tab */
 function renderHeaders(d) {
-  const statusText = d.status != null
-    ? h("span", { class: "status-chip " + statusClass(d) }, `${d.status} ${d.statusText || ""}`.trim())
+  const st = d.status != null ? statusInfo(d) : null;
+  const statusText = st
+    ? h("span", null, h("span", { class: "status-chip " + statusClass(d) }, `${d.status} ${st.name}`.trim()), " ", h("span", { class: "status-why" }, st.text))
     : d.state === "pending" ? "Pending…" : "—";
 
   const cause = causedBy(d);
   const pairs = [
     ["URL", mono(d.url)],
     ["Method", d.method],
-    ["Status", statusText],
+    ["Status", statusText, st ? `${d.status} ${st.name}`.trim() : undefined],
     d.httpVersion && ["Version", d.httpVersion],
     d.ip && ["Address", mono(d.ip)],
     ["Type", `${causeLabel(d.type)}${effectiveMime(d).mime ? " · " + mimeTitle(d) : ""}`],
