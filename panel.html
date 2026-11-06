@@ -63,6 +63,7 @@
     <label class="check" title="Capture response bodies for new requests">
       <input type="checkbox" id="opt-bodies"> Capture bodies
     </label>
+    <button id="btn-help" class="icon-btn" aria-haspopup="dialog" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
     <button id="btn-har" class="icon-btn" title="Save the requests shown as a HAR file" aria-label="Save as HAR">
       <svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -71,6 +72,47 @@
   <div id="tab-pop" hidden>
     <input id="tab-search" type="search" spellcheck="false" placeholder="Find a tab" aria-label="Find a tab" aria-controls="tab-options">
     <ul id="tab-options" role="listbox" aria-label="Tabs"></ul>
+  </div>
+
+  <div id="help-pop" role="dialog" aria-label="Keyboard shortcuts" hidden>
+    <div class="help-head"><strong>Keyboard shortcuts</strong><button id="help-close" class="icon-btn" title="Close (Esc)" aria-label="Close">×</button></div>
+    <div class="help-cols">
+      <section>
+        <h3>Requests</h3>
+        <dl>
+          <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Previous / next request</dd>
+          <dt><kbd>Page Up</kbd> <kbd>Page Down</kbd></dt><dd>A screen up / down</dd>
+          <dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>First / last request</dd>
+          <dt><kbd class="mod">Ctrl</kbd> <kbd>↑</kbd></dt><dd>The request that started this one</dd>
+          <dt><kbd class="mod">Ctrl</kbd> <kbd>↓</kbd></dt><dd>Next request one level higher</dd>
+          <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Collapse / expand (Tree view)</dd>
+          <dt><kbd>Enter</kbd> <kbd>Space</kbd></dt><dd>Open / close the request's details</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Close the details</dd>
+        </dl>
+      </section>
+      <section>
+        <h3>Details</h3>
+        <dl>
+          <dt><kbd>Tab</kbd> / <kbd>Shift</kbd> <kbd>Tab</kbd></dt><dd>Next / previous tab</dd>
+          <dt><kbd>Shift</kbd> <kbd>→</kbd> / <kbd>Shift</kbd> <kbd>←</kbd></dt><dd>Next / previous tab</dd>
+          <dt><kbd>Shift</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Scroll</dd>
+          <dt><kbd>Shift</kbd> <kbd>Page Up</kbd> <kbd>Page Down</kbd></dt><dd>Scroll a page</dd>
+          <dt><kbd>Shift</kbd> <kbd>Home</kbd> <kbd>End</kbd></dt><dd>Top / bottom</dd>
+        </dl>
+        <h3>Anywhere</h3>
+        <dl>
+          <dt><kbd class="mod">Ctrl</kbd> <kbd>F</kbd></dt><dd>Filter rules</dd>
+          <dt><kbd class="mod">Ctrl</kbd> <kbd>R</kbd> / <kbd>F5</kbd></dt><dd>Reload the inspected tab (with <kbd>Shift</kbd>: bypass the cache)</dd>
+          <dt><kbd>?</kbd></dt><dd>This list</dd>
+        </dl>
+        <h3>Mouse</h3>
+        <dl>
+          <dt><kbd>Alt</kbd> + click</dt><dd>On an arrow or tree line: everything below</dd>
+          <dt>Drag the overview</dt><dd>Show only that time range</dd>
+          <dt>Right-click</dt><dd>Copy options everywhere</dd>
+        </dl>
+      </section>
+    </div>
   </div>
 
   <div id="rules-pop" role="dialog" aria-label="Filter rules" hidden>

@@ -952,6 +952,31 @@ ruleAdd.addEventListener("input", () => {
   clearTimeout(filterTimer);
   filterTimer = setTimeout(compileFilters, 120);
 });
+/* Keyboard shortcuts popup: the ? button or the ? key. */
+const helpBtn = $("btn-help");
+const helpPop = $("help-pop");
+if (/Mac/.test(navigator.platform)) for (const k of helpPop.querySelectorAll("kbd.mod")) k.textContent = "⌘";
+function openHelp() {
+  helpPop.hidden = false;
+  helpBtn.classList.add("active");
+  const r = helpBtn.getBoundingClientRect();
+  helpPop.style.left = Math.max(8, Math.min(r.right - helpPop.offsetWidth, window.innerWidth - helpPop.offsetWidth - 8)) + "px";
+  helpPop.style.top = r.bottom + 4 + "px";
+}
+function closeHelp() { helpPop.hidden = true; helpBtn.classList.remove("active"); }
+helpBtn.addEventListener("click", () => (helpPop.hidden ? openHelp() : closeHelp()));
+$("help-close").addEventListener("click", closeHelp);
+document.addEventListener("mousedown", (ev) => {
+  if (!helpPop.hidden && !helpPop.contains(ev.target) && ev.target !== helpBtn) closeHelp();
+});
+document.addEventListener("keydown", (ev) => {
+  if (!helpPop.hidden && ev.key === "Escape") { ev.preventDefault(); ev.stopImmediatePropagation(); closeHelp(); return; }
+  if (ev.key === "?" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.target.matches("input, textarea, select, [contenteditable]")) {
+    ev.preventDefault();
+    if (helpPop.hidden) openHelp(); else closeHelp();
+  }
+}, true);
+
 // Ctrl+F (Cmd+F) opens the filter rules, like focusing the filter in DevTools.
 document.addEventListener("keydown", (ev) => {
   if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === "f" || ev.key === "F")) {
@@ -1307,6 +1332,30 @@ tbody.addEventListener("click", (ev) => {
   select(Number(tr.dataset.id));
 });
 
+// Moves the keyboard to a row: the open details follow it; otherwise only the cursor moves.
+function goToRow(id) {
+  if (state.selectedId != null) select(id);
+  else moveCursor(id);
+}
+
+/* The row Ctrl+Up / Ctrl+Down go to from `id` (see the keyboard handler).
+ * Parents are the same as in the tree view; in the list view a parent that the
+ * filters hide is skipped for the nearest one shown. */
+function levelJump(id, dir) {
+  const parent = treeParents();
+  if (dir < 0) {
+    for (let p = parent.get(id); p != null; p = parent.get(p)) if (viewPos.has(p)) return p;
+    return null;
+  }
+  // Down: the next row whose parent is one of this request's grandparents or
+  // higher, or a top-level row (in the tree: the next row at a higher level;
+  // in the time-ordered list: the next one of the same family, a level up).
+  const allowed = new Set([undefined]);
+  for (let p = parent.get(parent.get(id)); p != null; p = parent.get(p)) allowed.add(p);
+  for (let i = viewPos.get(id) + 1; i < view.length; i++) if (allowed.has(parent.get(view[i]))) return view[i];
+  return null;
+}
+
 function moveCursor(id) {
   state.cursorId = id;
   if (viewPos.has(id)) revealIndex(viewPos.get(id));
@@ -1420,6 +1469,17 @@ document.addEventListener("keydown", (ev) => {
       ev.preventDefault();
       toggleCollapsed(cursor, false);
     }
+    return;
+  }
+  // Ctrl+Up: the request that started this one. Ctrl+Down: the next request
+  // below at a higher level (the parent's next sibling), or the next top-level one.
+  if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && (ev.key === "ArrowUp" || ev.key === "ArrowDown")) {
+    ev.preventDefault();
+    if (viewDirty) rebuildView();
+    if (cursor == null || !viewPos.has(cursor)) return;
+    const target = levelJump(cursor, ev.key === "ArrowUp" ? -1 : 1);
+    if (target != null) goToRow(target);
+    else toast(ev.key === "ArrowUp" ? "This request has no parent in the list" : "No higher-level request below");
     return;
   }
   // Up/Down: one row. PageUp/PageDown: a screenful, keeping one row of overlap.

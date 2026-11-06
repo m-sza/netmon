@@ -24,12 +24,14 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 | Keys | Action |
 |---|---|
 | ↑ ↓, Page Up/Down, Home/End | Move through the requests |
+| Ctrl+↑ / Ctrl+↓ | The request that started this one / the next request one level higher |
 | Enter / Space | Open or close the request's details |
 | Tab / Shift+Tab, Shift+→ / Shift+← | Next / previous details tab |
 | Shift+↑ ↓, Shift+Page Up/Down | Scroll the details |
 | Ctrl+R / F5 (Shift for a hard reload) | Reload the inspected tab |
 | Ctrl+F | Filter rules |
 | Esc | Close the details |
+| ? | All shortcuts (also the ? button) |
 
 ## Build
 
