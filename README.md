@@ -2,7 +2,7 @@
 
 A browser extension for Firefox and Chrome that records network traffic in the background, all the time, and shows it in a DevTools-style network panel in its own window. No need to open DevTools before the request happens.
 
-![netmon showing a Wikipedia page load: the overview timeline, the request list and a JSON response](docs/screenshot.png)
+![netmon showing a Wikipedia page load: the overview timeline, the request list and a JSON response](docs/netmon-dark-tree.png)
 
 ## Features
 
