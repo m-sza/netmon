@@ -29,7 +29,7 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 | Shift+→ / Shift+←, 1–9 | Next / previous details tab, or that tab |
 | Shift+↑ ↓, Shift+Page Up/Down | Scroll the details |
 | R | Raw on / off (headers, JSON, HTML) |
-| M | Raw JSON as sent, pretty-printed or minified |
+| M | Raw JSON pretty-printed / minified (starts as sent) |
 | F, N / Shift+N | Find in the body, next / previous match |
 | Ctrl+Shift+↑ ↓ / Home / End, Alt+Page Up/Down (Ctrl+Shift+←/→ for JSON) | Highlight a row in the details (collapse / expand) |
 | Ctrl+C, C, K, P / Shift+P | Copy the highlighted row, its value, its key, its JSON path (JavaScript / Python) |

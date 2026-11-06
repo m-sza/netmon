@@ -39,7 +39,6 @@ const state = {
   detailsTab: "headers",
   rawHeaders: false,
   rawBody: false,          // bodies as source text, not as a JSON tree or page preview
-  textFormat: "sent",      // raw JSON: "sent" (as received), "pretty" or "min"
   recording: true,
   captureBodies: true,
   blocked: new Set(),
@@ -2247,16 +2246,22 @@ function bodyView(buf, mime, charset, url, ctx) {
   const treeBtns = tree && h("span", { class: "tree-btns" },
     h("button", { class: "text-btn", onclick: () => tree.expandAll() }, "Expand all"),
     h("button", { class: "text-btn", onclick: () => tree.collapseAll() }, "Collapse all"));
-  // Raw JSON as sent, pretty-printed or minified (the M key cycles).
+  // Raw JSON pretty-printed or minified (the M key switches). It starts the
+  // way it was sent: JSON with line breaks counts as pretty (a raw line break
+  // can only be whitespace, never inside a string), and that one shows the
+  // text exactly as sent.
+  const sentFmt = tree && /\n/.test(text.trim()) ? "pretty" : "min";
+  let fmt = sentFmt;
   const formatted = {};
-  const textFor = (f) => (!tree || f === "sent" ? text : (formatted[f] ??= reformatJson(text, f === "pretty")));
-  const fmtSeg = tree && h("span", { class: "seg fmt-seg", title: "Show the JSON as sent, pretty-printed or minified. Key: M" },
-    ...TEXT_FORMATS.map(([f, label]) => h("button", { "data-fmt": f, onclick: () => { state.textFormat = f; show(); } }, label)));
+  const textFor = (f) => (!tree || f === sentFmt ? text : (formatted[f] ??= reformatJson(text, f === "pretty")));
+  const fmtSeg = tree && h("span", { class: "seg fmt-seg", title: "Show the JSON pretty-printed or minified. Key: M" },
+    ...[["pretty", "Pretty"], ["min", "Minified"]].map(([f, label]) =>
+      h("button", { "data-fmt": f, title: f === sentFmt ? "As sent" : "Reformatted (values unchanged)", onclick: () => { fmt = f; show(); } }, label)));
   if (fmtSeg) fmtCtl.set(fmtSeg, () => {
     if (!state.rawBody) { state.rawBody = true; rawBox.checked = true; }
-    else state.textFormat = TEXT_FORMATS[(TEXT_FORMATS.findIndex(([f]) => f === state.textFormat) + 1) % TEXT_FORMATS.length][0];
+    else fmt = fmt === "pretty" ? "min" : "pretty";
     show();
-    toast(TEXT_FORMATS.find(([f]) => f === state.textFormat)[2]);
+    toast(`JSON ${fmt === "pretty" ? "pretty-printed" : "minified"}${fmt === sentFmt ? " (as sent)" : ""}`);
   });
   let highlighted = null; // the format the source view shows
   const show = () => {
@@ -2266,7 +2271,6 @@ function bodyView(buf, mime, charset, url, ctx) {
     if (tree) { tree.el.hidden = !useTree; treeBtns.hidden = !useTree; fmtSeg.hidden = useTree; }
     pre.hidden = useTree || usePreview;
     if (useTree || usePreview) { limitNote.hidden = plainNote.hidden = true; finder.refresh(); return; }
-    const fmt = tree ? state.textFormat : "sent";
     if (fmtSeg) for (const b of fmtSeg.children) b.classList.toggle("active", b.dataset.fmt === fmt);
     const body = textFor(fmt);
     const shown = body.length > TEXT_LIMIT ? body.slice(0, TEXT_LIMIT) : body;
@@ -2281,7 +2285,7 @@ function bodyView(buf, mime, charset, url, ctx) {
   show();
 
   const actions = h("div", { class: "actions" },
-    h("button", { class: "text-btn", title: "Copy the body (raw JSON in the format shown)", onclick: (e) => copyText(tree && state.rawBody ? textFor(state.textFormat) : text, e.currentTarget) }, "Copy"),
+    h("button", { class: "text-btn", title: "Copy the body (raw JSON in the format shown)", onclick: (e) => copyText(tree && state.rawBody ? textFor(fmt) : text, e.currentTarget) }, "Copy"),
     treeBtns,
     rawBox
       ? h("label", { class: "check", title: preview ? "Show the HTML source instead of the page (the preview runs no scripts). Key: R" : "Show the JSON as sent instead of the tree. Key: R" },
@@ -2295,7 +2299,6 @@ function bodyView(buf, mime, charset, url, ctx) {
   return wrap;
 }
 
-const TEXT_FORMATS = [["sent", "As sent", "JSON as sent"], ["pretty", "Pretty", "JSON pretty-printed"], ["min", "Minified", "JSON minified"]];
 const fmtCtl = new WeakMap(); // .fmt-seg element -> cycles the format
 
 /* Re-lays out valid JSON text: pretty (2-space indent) or minified. Works on
