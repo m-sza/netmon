@@ -342,7 +342,7 @@ function buildRow() {
     const td = document.createElement("td");
     td.className = "c-" + c;
     if (c === "waterfall") td.append(h("div", { class: "bar" }, h("div", { class: "bar-wait" })));
-    if (c === "file") td.append(h("span", { class: "twisty" }), makeIcon(), h("span", { class: "fname" }));
+    if (c === "file") td.append(h("span", { class: "twisty" }), makeIcon(), h("span", { class: "fname" }), h("span", { class: "tguides" }));
     tr.append(td);
   }
   return tr;
@@ -361,7 +361,7 @@ function fillRow(tr, s) {
   cDomain.textContent = u ? u.host : "";
   cDomain.title = u ? u.origin : "";
 
-  cFile.lastChild.textContent = fileName(s.url);
+  cFile.querySelector(".fname").textContent = fileName(s.url);
   cFile.title = s.url;
   const kind = iconKind(s);
   if (cFile.dataset.icon !== kind) {
@@ -535,19 +535,43 @@ function flattenTree() {
 
   treeInfo = new Map();
   const out = [];
-  const stack = sortIds(roots.filter((id) => keep.has(id))).reverse().map((id) => [id, 0]);
+  const NO_ANC = [];
+  const stack = sortIds(roots.filter((id) => keep.has(id))).reverse().map((id) => [id, 0, NO_ANC]);
   while (stack.length) {
-    const [id, depth] = stack.pop();
+    const [id, depth, anc] = stack.pop();
     const shownKids = (kids.get(id) || []).filter((k) => keep.has(k));
-    treeInfo.set(id, { depth, kids: shownKids.length, context: !matched.has(id) });
+    treeInfo.set(id, { depth, kids: shownKids.length, context: !matched.has(id), anc }); // anc: ancestors, root first
     out.push(id);
     if (!collapsed.has(id)) {
       const ordered = sortIds(shownKids);
-      for (let i = ordered.length - 1; i >= 0; i--) stack.push([ordered[i], depth + 1]);
+      const kidAnc = [...anc, id];
+      for (let i = ordered.length - 1; i >= 0; i--) stack.push([ordered[i], depth + 1, kidAnc]);
     }
   }
   return out;
 }
+
+const TREE_INDENT = 14;     // px per tree level (the twisty's width + gap)
+let treeGuideHover = null; // the request whose tree line (or arrow) is hovered
+
+// Hovering a tree line or an arrow highlights that request's whole line and
+// its arrow, like the JSON tree.
+function setTreeGuideHover(id) {
+  if (id === treeGuideHover) return;
+  treeGuideHover = id;
+  for (const g of tbody.querySelectorAll(".tguide")) g.classList.toggle("hl", Number(g.dataset.anc) === id);
+  for (const tr of tbody.querySelectorAll("tr[data-id]")) tr.children[3].firstChild.classList.toggle("hl", Number(tr.dataset.id) === id);
+  for (const tr of tbody.querySelectorAll("tr[data-id]")) tr.children[3].querySelector(".tguides")._key = null;
+}
+tbody.addEventListener("mouseover", (ev) => {
+  if (state.viewMode !== "tree") return;
+  const g = ev.target.closest(".tguide");
+  if (g) { setTreeGuideHover(Number(g.dataset.anc)); return; }
+  const tw = ev.target.closest(".twisty");
+  if (tw && tw.textContent) { setTreeGuideHover(Number(tw.closest("tr").dataset.id)); return; }
+  setTreeGuideHover(null);
+});
+tbody.addEventListener("mouseleave", () => setTreeGuideHover(null));
 
 function toggleCollapsed(id, deep) {
   const close = !collapsed.has(id);
@@ -620,8 +644,20 @@ function renderRows(t0, span, now) {
     tr.classList.toggle("cursor", id === state.cursorId && id !== state.selectedId);
     const node = treeInfo && treeInfo.get(id);
     const fileCell = tr.children[3];
-    fileCell.style.paddingLeft = node ? 4 + node.depth * 14 + "px" : "";
+    fileCell.style.paddingLeft = node ? 4 + node.depth * TREE_INDENT + "px" : "";
     const twisty = fileCell.firstChild;
+    twisty.classList.toggle("hl", node != null && id === treeGuideHover);
+    // Tree lines: one per ancestor, under its arrow; they join up row to row.
+    const guides = fileCell.querySelector(".tguides");
+    const anc = node ? node.anc : [];
+    if (guides._key !== anc.join() + "|" + treeGuideHover) {
+      guides._key = anc.join() + "|" + treeGuideHover;
+      guides.replaceChildren(...anc.map((a, d) => {
+        const g = h("span", { class: "tguide" + (a === treeGuideHover ? " hl" : ""), "data-anc": a, title: "Collapse" });
+        g.style.left = 4 + d * TREE_INDENT + "px";
+        return g;
+      }));
+    }
     twisty.textContent = node && node.kids ? (collapsed.has(id) ? "▸" : "▾") : "";
     twisty.title = node && node.kids ? `${node.kids} request${node.kids === 1 ? "" : "s"} started by this one. Alt+click for everything below.` : "";
     tr.classList.toggle("context", !!(node && node.context));
@@ -1248,6 +1284,16 @@ tbody.addEventListener("click", (ev) => {
   if (!tr) return;
   if (ev.target.closest(".twisty") && ev.target.textContent) {
     toggleCollapsed(Number(tr.dataset.id), ev.altKey);
+    return;
+  }
+  const guide = ev.target.closest(".tguide");
+  if (guide) {
+    // Collapse the request the line belongs to, and keep its row in sight.
+    const anc = Number(guide.dataset.anc);
+    toggleCollapsed(anc, ev.altKey);
+    setTreeGuideHover(null);
+    if (viewDirty) rebuildView();
+    if (viewPos.has(anc)) revealIndex(viewPos.get(anc));
     return;
   }
   select(Number(tr.dataset.id));

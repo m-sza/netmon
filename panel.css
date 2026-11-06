@@ -415,7 +415,20 @@ body.tree-mode #rows .twisty {
   display: inline-block; width: 12px; margin-right: 2px;
   color: var(--muted); text-align: center; cursor: pointer; user-select: none;
 }
-body.tree-mode #rows .twisty:hover { color: var(--text); }
+body.tree-mode #rows .twisty:hover, body.tree-mode #rows .twisty.hl { color: var(--accent); }
+/* Tree lines, as in the JSON tree: a 1px line under each ancestor's arrow;
+   the click target is the whole indent step, so neighbors touch. */
+#rows .tguides { display: none; }
+body.tree-mode #rows td.c-file { position: relative; }
+body.tree-mode #rows .tguides { display: block; }
+#rows .tguide { position: absolute; top: 0; bottom: 0; width: 14px; cursor: pointer; }
+#rows .tguide::after {
+  content: ""; position: absolute; left: 6px; top: 0; bottom: 0; width: 1px;
+  background: var(--border); transition: background-color 0.1s;
+}
+#rows .tguide.hl::after { left: 5.5px; width: 2px; border-radius: 1px; background: var(--accent); }
+#rows tr.selected .tguide::after { background: rgb(255 255 255 / 40%); }
+#rows tr.selected .tguide.hl::after { background: var(--sel-text); }
 #rows tr.context td { opacity: 0.55; }
 #rows tr.context.selected td { opacity: 1; }
 
