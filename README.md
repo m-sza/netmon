@@ -26,10 +26,14 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 | ↑ ↓, Page Up/Down, Home/End | Move through the requests |
 | Ctrl+↑ / Ctrl+↓ | The request that started this one / the next request one level higher |
 | Enter / Space | Open or close the request's details |
-| Tab / Shift+Tab, Shift+→ / Shift+← | Next / previous details tab |
+| Shift+→ / Shift+←, 1–9 | Next / previous details tab, or that tab |
 | Shift+↑ ↓, Shift+Page Up/Down | Scroll the details |
+| R | Raw on / off (headers, JSON, HTML) |
+| F, N / Shift+N | Find in the body, next / previous match |
+| Ctrl+Shift+↑ ↓ (←/→ for JSON) | Highlight a row in the details (collapse / expand) |
+| Ctrl+C, C, K, P / Shift+P | Copy the highlighted row, its value, its key, its JSON path (JavaScript / Python) |
 | Ctrl+R / F5 (Shift for a hard reload) | Reload the inspected tab |
-| Ctrl+F | Filter rules |
+| Ctrl+F or / | Filter rules |
 | Esc | Close the details |
 | ? | All shortcuts (also the ? button) |
 

@@ -54,6 +54,7 @@ const JsonTree = (() => {
   /* ---- rendering ---- */
   const info = new WeakMap(); // .jt-node element -> { node, depth, built, ctx }
   const lineCtx = new WeakMap(); // a primitive's .jt-line -> ctx
+  const nodeEl = new WeakMap(); // parsed node -> its .jt-node (sections) or .jt-line (primitives), once built
   // ctx: { node, key (raw JSON string or null), index, parent ctx or null }
 
   function span(cls, text) {
@@ -78,12 +79,14 @@ const JsonTree = (() => {
     if (node.t !== "obj" && node.t !== "arr") {
       const div = line(key, span("tok-" + node.t, node.raw), ...commaParts);
       lineCtx.set(div, ctx);
+      nodeEl.set(node, div);
       return div;
     }
     const [open, close] = node.t === "obj" ? ["{", "}"] : ["[", "]"];
     if (!node.kids.length) {
       const div = line(key, span("tok-punc", open + close), ...commaParts);
       lineCtx.set(div, ctx);
+      nodeEl.set(node, div);
       return div;
     }
 
@@ -104,8 +107,11 @@ const JsonTree = (() => {
     const guide = span("jt-guide", "");
     guide.title = "Collapse";
     kids.append(guide);
-    el.append(head, kids, line(null, span("tok-punc", close), ...commaParts));
+    const closing = line(null, span("tok-punc", close), ...commaParts);
+    closing.classList.add("jt-close");
+    el.append(head, kids, closing);
     info.set(el, { node, depth, built: false, ctx });
+    nodeEl.set(node, el);
 
     if (depth < autoDepth) setOpen(el, true, false, autoDepth);
     return el;
@@ -179,9 +185,63 @@ const JsonTree = (() => {
       value: () => (isSection ? serialize(ctx.node) : plain(ctx.node)),
       parent: ctx.parent ? () => serialize(ctx.parent.node) : null,
       parentKind: ctx.parent ? (ctx.parent.node.t === "obj" ? "object" : "array") : null,
+      // As a JSON fragment: "key": value inside an object, else just the value.
+      row: () => (ctx.key != null ? `${ctx.key}: ` : "") + serialize(ctx.node),
       path: ctx.parent ? path(ctx) : null,
       pythonPath: ctx.parent ? path(ctx, true) : null,
     };
+  }
+
+  /* ---- keyboard: lines are .jt-line elements (a section's first line stands for it) ---- */
+  const sectionOf = (ln) => (ln.parentElement.classList.contains("jt-node") && ln === ln.parentElement.firstElementChild ? ln.parentElement : null);
+  // Left: collapse an open section, else go to the section it's in. Right:
+  // expand a closed section, else go to its first line. Returns the line to
+  // move to (the same one when it only toggled), or null.
+  function step(ln, dir) {
+    const sec = sectionOf(ln);
+    if (dir < 0) {
+      if (sec && !sec.classList.contains("collapsed")) { setOpen(sec, false, false); return ln; }
+      const up = ln.closest(".jt-kids");
+      return up ? up.parentElement.firstElementChild : null;
+    }
+    if (!sec) return null;
+    if (sec.classList.contains("collapsed")) { setOpen(sec, true, false); return ln; }
+    const first = sec.children[1].children[1]; // after the guide
+    return first ? (first.classList.contains("jt-node") ? first.firstElementChild : first) : null;
+  }
+
+  /* ---- search: over the parsed values, so matches inside collapsed (or
+   * never built) sections are found too ---- */
+  // The text a line shows, as search sees it: "key": value for values, the
+  // key alone for sections.
+  const lineText = (key, node) => (node.t === "obj" || node.t === "arr" ? (key != null ? key : "") : (key != null ? key + ": " : "") + node.raw);
+  // Matches of `re` (a global, case-insensitive RegExp), in order:
+  // { chain: [root … node], nth, len } where nth counts the matches within
+  // the line's first len characters.
+  function find(root, re, limit) {
+    const out = [];
+    const walk = (key, node, chain) => {
+      if (out.length >= limit) return;
+      const text = lineText(key, node);
+      re.lastIndex = 0;
+      let n = 0;
+      while (text && re.exec(text) && out.length < limit) { out.push({ chain, nth: n++, len: text.length }); if (re.lastIndex === 0) break; }
+      if (node.kids) for (const [k, child] of node.kids) walk(k, child, chain.concat(child));
+    };
+    walk(null, root, [root]);
+    return out;
+  }
+  // The line of a match, opening the sections around it when reveal is set
+  // (else null when it isn't built).
+  function lineOf(m, reveal) {
+    for (let i = 0; i < m.chain.length - 1; i++) {
+      const el = nodeEl.get(m.chain[i]);
+      if (!el) return null;
+      if (reveal) setOpen(el, true, false);
+      else if (el.classList.contains("collapsed")) return null;
+    }
+    const el = nodeEl.get(m.chain[m.chain.length - 1]);
+    return el ? (el.classList.contains("jt-node") ? el.firstElementChild : el) : null;
   }
 
   /* Returns a viewer element, or null if text isn't valid JSON. */
@@ -210,7 +270,13 @@ const JsonTree = (() => {
 
     const top = wrap.firstElementChild;
     const all = (open) => { if (top.classList.contains("jt-node")) setOpen(top, open, true); };
-    return { el: wrap, entryAt, expandAll: () => all(true), collapseAll: () => { all(false); if (top.classList.contains("jt-node")) setOpen(top, true, false); } };
+    return {
+      el: wrap, entryAt, step,
+      find: (re, limit) => find(root, re, limit),
+      lineOf,
+      expandAll: () => all(true),
+      collapseAll: () => { all(false); if (top.classList.contains("jt-node")) setOpen(top, true, false); },
+    };
   }
 
   return { render };

@@ -38,8 +38,7 @@ const state = {
   cursorId: null,          // the row the keyboard is on; Enter/Space opens it
   detailsTab: "headers",
   rawHeaders: false,
-  rawJson: false,
-  htmlPreview: true,
+  rawBody: false,          // bodies as source text, not as a JSON tree or page preview
   recording: true,
   captureBodies: true,
   blocked: new Set(),
@@ -1008,9 +1007,10 @@ document.addEventListener("keydown", (ev) => {
   }
 }, true);
 
-// Ctrl+F (Cmd+F) opens the filter rules, like focusing the filter in DevTools.
+// Ctrl+F (Cmd+F) or / opens the filter rules, like focusing the filter in DevTools.
 document.addEventListener("keydown", (ev) => {
-  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === "f" || ev.key === "F")) {
+  const slash = ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.target.matches("input, textarea, select, [contenteditable]") && !document.querySelector("dialog[open]");
+  if (slash || ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === "f" || ev.key === "F"))) {
     ev.preventDefault();
     if (rulesPop.hidden) openRules(); else ruleAdd.focus();
   }
@@ -1464,6 +1464,8 @@ function closeDetails() {
   splitter.hidden = true;
   document.body.classList.remove("has-details");
   revokeBlobs();
+  detailsCursor = null;
+  clearFindHighlights();
   detailsBody.replaceChildren();
 }
 
@@ -1502,7 +1504,8 @@ document.addEventListener("keydown", async (ev) => {
 
 document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, select, textarea") || document.querySelector("dialog[open]")) return;
-  if (ev.key === "Escape") { closeDetails(); return; }
+  // Escape: first drops the highlighted details row, then closes the details.
+  if (ev.key === "Escape") { if (hasDetailsCursor()) setDetailsCursor(null); else closeDetails(); return; }
   const cursor = state.cursorId != null && viewPos.has(state.cursorId) ? state.cursorId : state.selectedId;
   const open = state.selectedId != null;
   // Enter / Space open the row the keyboard is on, and close it again, like
@@ -1514,12 +1517,51 @@ document.addEventListener("keydown", (ev) => {
     return;
   }
   if (open) {
-    // Tab / Shift+Tab and Shift+Right / Shift+Left: next / previous details tab.
-    const tabKey = ev.key === "Tab" && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
-    const arrowKey = (ev.key === "ArrowRight" || ev.key === "ArrowLeft") && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey;
-    if (tabKey || arrowKey) {
+    const plain = !ev.ctrlKey && !ev.altKey && !ev.metaKey;
+    const accel = (ev.ctrlKey || ev.metaKey) && !ev.altKey;
+    // Shift+Right / Shift+Left: next / previous details tab. 1–9: that tab.
+    if ((ev.key === "ArrowRight" || ev.key === "ArrowLeft") && ev.shiftKey && plain) {
       ev.preventDefault();
-      stepDetailsTab(tabKey ? (ev.shiftKey ? -1 : 1) : ev.key === "ArrowRight" ? 1 : -1);
+      stepDetailsTab(ev.key === "ArrowRight" ? 1 : -1);
+      return;
+    }
+    if (plain && /^[1-9]$/.test(ev.key)) {
+      ev.preventDefault();
+      goDetailsTab(Number(ev.key) - 1);
+      return;
+    }
+    // Ctrl+Shift + Up/Down, Home/End: highlight a row of the details. Left /
+    // Right: collapse / expand a JSON section.
+    if (accel && ev.shiftKey) {
+      const MOVE = { ArrowDown: 1, ArrowUp: -1, Home: "first", End: "last" };
+      if (ev.key in MOVE) { ev.preventDefault(); moveDetailsCursor(MOVE[ev.key]); return; }
+      if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") { ev.preventDefault(); stepDetailsCursor(ev.key === "ArrowRight" ? 1 : -1); return; }
+    }
+    // Letters by what they type, or by their key on layouts without Latin letters.
+    const letter = /^[a-z]$/i.test(ev.key) ? ev.key.toLowerCase() : /^Key[A-Z]$/.test(ev.code) ? ev.code.slice(3).toLowerCase() : null;
+    // Copying from the highlighted row: Ctrl+C the row (unless text is
+    // selected), C the value, K the key, P the path (Shift+P: Python).
+    if (hasDetailsCursor()) {
+      if (accel && !ev.shiftKey && letter === "c" && !String(getSelection())) { ev.preventDefault(); copyFromDetailsCursor("row"); return; }
+      const what = plain && (letter === "c" && !ev.shiftKey ? "value" : letter === "k" && !ev.shiftKey ? "key" : letter === "p" ? (ev.shiftKey ? "pypath" : "path") : null);
+      if (what) { ev.preventDefault(); copyFromDetailsCursor(what); return; }
+    }
+    if (plain && !ev.shiftKey && letter === "r") {
+      ev.preventDefault();
+      const box = [...detailsBody.querySelectorAll("input[data-raw]")].find((b) => b.getClientRects().length);
+      if (box) box.click();
+      else toast("Nothing to switch to raw here");
+      return;
+    }
+    // F: find in the body. N / Shift+N: next / previous match.
+    if (plain && (letter === "f" && !ev.shiftKey || letter === "n")) {
+      ev.preventDefault();
+      const el = [...detailsBody.querySelectorAll(".find")].find((f) => f.getClientRects().length);
+      const ctl = el && findCtl.get(el);
+      if (!ctl) toast("No text body to search here");
+      else if (letter === "f") ctl.focus();
+      else if (ev.shiftKey) ctl.prev();
+      else ctl.next();
       return;
     }
     // Shift + Up/Down, Page Up/Down, Home/End scroll the details pane.
@@ -1667,6 +1709,10 @@ function stepDetailsTab(dir) {
   const i = btns.findIndex((b) => b.classList.contains("active"));
   btns[(i + dir + btns.length) % btns.length].click();
 }
+function goDetailsTab(i) {
+  const btns = [...document.querySelectorAll("#details-tabs button[data-tab]")].filter((b) => !b.hidden);
+  if (btns[i]) btns[i].click();
+}
 // A click on a details tab doesn't leave focus on it, so Enter/Space/arrows
 // keep working on the list.
 $("details-tabs").addEventListener("mousedown", (ev) => { if (ev.target.closest("button[data-tab]")) ev.preventDefault(); });
@@ -1705,6 +1751,9 @@ function revokeBlobs() {
 
 function renderDetails(keepScroll) {
   const scroll = detailsBody.scrollTop;
+  const cursorAt = keepScroll && hasDetailsCursor() ? detailLines().indexOf(detailsCursor) : -1;
+  detailsCursor = null;
+  clearFindHighlights();
   revokeBlobs();
   for (const b of document.querySelectorAll("#details-tabs button[data-tab]")) {
     b.classList.toggle("active", b.dataset.tab === state.detailsTab);
@@ -1723,6 +1772,7 @@ function renderDetails(keepScroll) {
   const render = { headers: renderHeaders, cookies: renderCookies, request: renderRequest, response: renderResponse, timings: renderTimings, security: renderSecurity, messages: renderMessages }[state.detailsTab];
   detailsBody.append(...[].concat(render(current)).filter(Boolean));
   if (keepScroll) detailsBody.scrollTop = scroll;
+  if (cursorAt >= 0) { const lines = detailLines(); if (lines.length) setDetailsCursor(lines[Math.min(cursorAt, lines.length - 1)], false); }
 }
 
 function note(text, cls) {
@@ -1817,8 +1867,8 @@ function renderHeaders(d) {
   const copyUrlBtn = h("button", { class: "text-btn", onclick: (e) => copyText(d.url, e.currentTarget) }, "Copy URL");
   const curlBtn = h("button", { class: "text-btn", onclick: (e) => copyText(curlCommand(d, false), e.currentTarget) }, "Copy as cURL");
   const rawToggle = h("label", { class: "check" },
-    h("input", { type: "checkbox", checked: state.rawHeaders, onchange: (e) => { state.rawHeaders = e.target.checked; renderDetails(true); } }),
-    "Raw headers");
+    h("input", { type: "checkbox", "data-raw": "", checked: state.rawHeaders, onchange: (e) => { state.rawHeaders = e.target.checked; renderDetails(true); } }),
+    "Raw");
 
   const u = safeUrl(d.url);
   const reqLine = `${d.method} ${u ? u.pathname + u.search : d.url} ${d.httpVersion || ""}`.trim();
@@ -2093,42 +2143,43 @@ function bodyView(buf, mime, charset, url, ctx) {
   const lang = Syntax.langFor(mime, url, text);
   const tree = lang === "json" && text.length <= TEXT_LIMIT ? JsonTree.render(text) : null;
   const preview = lang === "html" ? htmlPreview(text, url, ctx) : null;
-  if (tree) tree.el.addEventListener("contextmenu", (ev) => jsonMenu(ev, tree));
+  if (tree) { tree.el.addEventListener("contextmenu", (ev) => jsonMenu(ev, tree)); jsonTrees.set(tree.el, tree); }
 
   const pre = h("pre", { class: "code" });
   const limitNote = note(`Showing the first ${TEXT_LIMIT.toLocaleString()} characters.`);
   const plainNote = note("Syntax highlighting is off for bodies this large.");
+  const finder = createFinder(pre, tree, () => (preview && !state.rawBody ? "preview" : tree && !state.rawBody ? "tree" : "text"),
+    () => { state.rawBody = true; rawBox.checked = true; show(); });
   const treeBtns = tree && h("span", { class: "tree-btns" },
     h("button", { class: "text-btn", onclick: () => tree.expandAll() }, "Expand all"),
     h("button", { class: "text-btn", onclick: () => tree.collapseAll() }, "Collapse all"));
   let highlighted = false;
   const show = () => {
-    const usePreview = preview && state.htmlPreview;
+    const usePreview = preview && !state.rawBody;
     if (preview) preview.hidden = !usePreview;
-    const useTree = tree && !state.rawJson;
+    const useTree = tree && !state.rawBody;
     if (tree) { tree.el.hidden = !useTree; treeBtns.hidden = !useTree; }
     pre.hidden = useTree || usePreview;
-    if (useTree || usePreview) { limitNote.hidden = plainNote.hidden = true; return; }
+    if (useTree || usePreview) { limitNote.hidden = plainNote.hidden = true; finder.refresh(); return; }
     const shown = text.length > TEXT_LIMIT ? text.slice(0, TEXT_LIMIT) : text;
     if (!highlighted) { pre.replaceChildren(Syntax.highlight(shown, lang)); highlighted = true; }
     limitNote.hidden = text.length <= TEXT_LIMIT;
     plainNote.hidden = lang === "text" || shown.length <= Syntax.MAX_CHARS;
+    finder.refresh();
   };
+  // One "Raw" switch for every body that has another view (the JSON tree, the
+  // page preview): the R key flips it, like the one on the Headers tab.
+  const rawBox = (tree || preview) && h("input", { type: "checkbox", "data-raw": "", checked: state.rawBody, onchange: (e) => { state.rawBody = e.target.checked; show(); } });
   show();
 
   const actions = h("div", { class: "actions" },
     h("button", { class: "text-btn", onclick: (e) => copyText(text, e.currentTarget) }, "Copy"),
     treeBtns,
-    tree
-      ? h("label", { class: "check" },
-          h("input", { type: "checkbox", checked: state.rawJson, onchange: (e) => { state.rawJson = e.target.checked; show(); } }),
-          "Raw")
+    rawBox
+      ? h("label", { class: "check", title: preview ? "Show the HTML source instead of the page (the preview runs no scripts). Key: R" : "Show the JSON as sent instead of the tree. Key: R" },
+          rawBox, "Raw")
       : null,
-    preview
-      ? h("label", { class: "check", title: "Show the page rendered, with scripts turned off" },
-          h("input", { type: "checkbox", checked: state.htmlPreview, onchange: (e) => { state.htmlPreview = e.target.checked; show(); } }),
-          "Preview")
-      : null,
+    finder.el,
     h("span", { class: "note" }, `${Syntax.label(lang)} · ${fmtBytes(size)}`));
 
   wrap.append(actions, limitNote, plainNote, ...(tree ? [tree.el] : []), ...(preview ? [preview] : []), pre);
@@ -2153,6 +2204,193 @@ function jsonMenu(ev, tree) {
     { label: "Copy Path (Python)", disabled: !e.pythonPath, run: () => copy(e.pythonPath, "Path copied") },
   ], ev.target);
 }
+
+/* Find in a body (the F key, or the box next to Raw). Searches what's shown:
+ * the source text, or the JSON tree, where it also finds (and opens) matches
+ * in collapsed sections. Case-insensitive, plain text. Matches are painted
+ * with the CSS Custom Highlight API, so the text's DOM is never changed. */
+const FIND_LIMIT = 5000;
+const findCtl = new WeakMap(); // .find element -> { focus, next, prev }
+const jsonTrees = new WeakMap(); // .jtree element -> its JsonTree viewer
+const canHighlight = typeof CSS !== "undefined" && !!CSS.highlights && typeof Highlight === "function";
+function clearFindHighlights() {
+  if (canHighlight) { CSS.highlights.delete("nm-find"); CSS.highlights.delete("nm-find-current"); }
+}
+
+// Ranges of the matches of `re` in the text under root, looking at its first
+// `len` characters. Text nodes are joined first, so a match can span syntax colors.
+function textRanges(root, re, limit, len = Infinity) {
+  const inTree = !!root.closest(".jtree");
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, inTree
+    ? { acceptNode: (n) => (n.parentElement.closest(".jt-summary") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) }
+    : null);
+  const nodes = [], starts = [];
+  let text = "";
+  for (let n; (n = walker.nextNode());) { nodes.push(n); starts.push(text.length); text += n.data; }
+  if (len < text.length) text = text.slice(0, len);
+  const at = (pos) => { // the text node holding character pos
+    let lo = 0, hi = nodes.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= pos) lo = mid; else hi = mid - 1; }
+    return lo;
+  };
+  const out = [];
+  re.lastIndex = 0;
+  for (let m; out.length < limit && (m = re.exec(text));) {
+    const a = at(m.index), b = at(m.index + m[0].length - 1);
+    const r = document.createRange();
+    r.setStart(nodes[a], m.index - starts[a]);
+    r.setEnd(nodes[b], m.index + m[0].length - starts[b]);
+    out.push(r);
+  }
+  return out;
+}
+
+// Scrolls the details pane to show a rect: just enough (nearest), or with it
+// a third of the way down (center, for search results).
+function revealInDetails(rect, center) {
+  if (!rect.height && !rect.width) return;
+  const box = detailsBody.getBoundingClientRect();
+  const margin = 24;
+  const now = detailsBody.scrollTop;
+  const top = rect.top - box.top + now; // in the pane's content
+  let to = now;
+  if (center) {
+    if (rect.top < box.top + margin || rect.bottom > box.bottom - margin) to = top - detailsBody.clientHeight / 3;
+  } else if (rect.top < box.top + margin) to = top - margin;
+  else if (rect.bottom > box.bottom - margin) to = top + rect.height - detailsBody.clientHeight + margin;
+  if (to !== now) detailsScroller.to(to, 150);
+}
+
+// mode() says what's shown: "text", "tree" or "preview"; toSource() switches
+// to the source (search can't look into the page preview).
+function createFinder(pre, tree, mode, toSource) {
+  const input = h("input", { type: "text", class: "find-input", placeholder: "Find", spellcheck: false,
+    title: "Find in this body (key: F). Enter / Shift+Enter, or N / Shift+N: next / previous match. Esc: clear." });
+  const count = h("span", { class: "find-count" });
+  const el = h("span", { class: "find" }, input, count);
+  let matches = [], cur = -1, re = null, timer = null;
+
+  const paint = (scroll) => {
+    clearFindHighlights();
+    if (!re) { count.textContent = ""; return; }
+    count.textContent = matches.length ? `${cur + 1} of ${matches.length}${matches.length >= FIND_LIMIT ? "+" : ""}` : "No matches";
+    count.classList.toggle("none", !matches.length);
+    if (!matches.length) return;
+    let current, all;
+    if (mode() === "tree") {
+      const at = (m) => { const ln = tree.lineOf(m, false); return ln && textRanges(ln, re, m.nth + 1, m.len)[m.nth]; };
+      tree.lineOf(matches[cur], true); // opens the sections around it
+      current = at(matches[cur]);
+      all = matches.map(at).filter(Boolean);
+    } else {
+      current = matches[cur];
+      all = matches;
+    }
+    if (canHighlight) {
+      CSS.highlights.set("nm-find", new Highlight(...all));
+      const hl = new Highlight(current);
+      hl.priority = 1;
+      CSS.highlights.set("nm-find-current", hl);
+    }
+    if (scroll && current) revealInDetails(current.getBoundingClientRect(), true);
+  };
+  const run = () => {
+    clearTimeout(timer);
+    timer = null;
+    const q = input.value;
+    re = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi") : null;
+    matches = [];
+    cur = -1;
+    if (re && mode() === "preview") { toSource(); return; } // shows the source, which runs this again
+    if (re) {
+      matches = mode() === "tree" ? tree.find(re, FIND_LIMIT) : textRanges(pre, re, FIND_LIMIT);
+      if (matches.length) cur = 0;
+    }
+    paint(true);
+  };
+  const go = (dir) => {
+    if (timer) { run(); return; }
+    if (!re) { input.focus(); return; }
+    if (!matches.length) return;
+    cur = (cur + dir + matches.length) % matches.length;
+    paint(true);
+  };
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 150); });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") { ev.preventDefault(); go(ev.shiftKey ? -1 : 1); }
+    else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); input.value = ""; run(); input.blur(); }
+  });
+  findCtl.set(el, { focus: () => { input.focus(); input.select(); }, next: () => go(1), prev: () => go(-1) });
+  return { el, refresh: () => { if (input.value || re) run(); } };
+}
+
+/* The highlighted row of the details pane (Ctrl+Shift+Up/Down, or a click):
+ * a key/value row, or a line of a JSON tree. C, K and P copy from it. */
+let detailsCursor = null;
+const DETAIL_LINES = "table.kv tr, .jtree .jt-line:not(.jt-close)";
+function detailLines() {
+  return [...detailsBody.querySelectorAll(DETAIL_LINES)].filter((el) => (el.tagName !== "TR" || kvRows.has(el)) && el.getClientRects().length);
+}
+function setDetailsCursor(el, reveal) {
+  if (detailsCursor) detailsCursor.classList.remove("dcursor");
+  detailsCursor = el;
+  if (!el) return;
+  el.classList.add("dcursor");
+  if (reveal) revealInDetails(el.getBoundingClientRect(), false);
+}
+const hasDetailsCursor = () => !!detailsCursor && detailsCursor.isConnected && detailsCursor.getClientRects().length > 0;
+// how: +1 / -1 (a row down / up), "first" or "last". Without a highlighted
+// row, it starts from the rows in view.
+function moveDetailsCursor(how) {
+  const lines = detailLines();
+  if (!lines.length) { toast("No rows to move through here"); return; }
+  let i = hasDetailsCursor() ? lines.indexOf(detailsCursor) : -1;
+  if (how === "first") i = 0;
+  else if (how === "last") i = lines.length - 1;
+  else if (i < 0) {
+    const box = detailsBody.getBoundingClientRect();
+    const inView = lines.filter((l) => { const r = l.getBoundingClientRect(); return r.bottom > box.top && r.top < box.bottom; });
+    const start = how > 0 ? inView[0] : inView[inView.length - 1];
+    i = start ? lines.indexOf(start) : how > 0 ? 0 : lines.length - 1;
+  } else i = Math.max(0, Math.min(lines.length - 1, i + how));
+  setDetailsCursor(lines[i], true);
+}
+// Ctrl+Shift+Left / Right on a JSON line: collapse / expand, or go to the
+// section it's in / its first line.
+function stepDetailsCursor(dir) {
+  if (!hasDetailsCursor()) return;
+  const tree = jsonTrees.get(detailsCursor.closest(".jtree"));
+  const next = tree && tree.step(detailsCursor, dir);
+  if (next) setDetailsCursor(next, true);
+}
+// what: "row", "value", "key", "path" or "pypath"
+function copyFromDetailsCursor(what) {
+  const el = detailsCursor;
+  if (el.tagName === "TR") {
+    const { kind, name, value } = kvRows.get(el);
+    if (what === "row") copy(kind === "header" || kind === "fact" ? `${name}: ${value}` : `${name}=${value}`, "Row copied");
+    else if (what === "value") copy(value, "Value copied");
+    else if (what === "key") copy(name, "Name copied");
+    else toast("Paths are for lines of a JSON body");
+    return;
+  }
+  const e = jsonTrees.get(el.closest(".jtree")).entryAt(el);
+  if (!e) return;
+  const What = e.kind === "value" ? "Value" : e.kind === "object" ? "Object" : "Array";
+  if (what === "row") copy(e.row(), "Row copied");
+  else if (what === "value") copy(e.value(), `${What} copied`);
+  else if (what === "key") {
+    if (e.index != null) copy(String(e.index), "Index copied");
+    else if (e.key != null) copy(e.key, "Key copied");
+    else toast("The top level has no key");
+  } else if (!e.path) toast("The top level has no path");
+  else copy(what === "pypath" ? e.pythonPath : e.path, "Path copied");
+}
+detailsBody.addEventListener("click", (ev) => {
+  if (String(getSelection())) return; // selecting text, not picking a row
+  const el = ev.target.closest(DETAIL_LINES);
+  if (el && (el.tagName !== "TR" || kvRows.has(el))) setDetailsCursor(el, false);
+});
 
 /* Timings tab */
 function renderTimings(d) {
