@@ -37,5 +37,20 @@ if [ "$1" = "--install" ]; then
   fi
   [ -n "$FF" ] || { echo "No Firefox found; set FIREFOX=/path/to/firefox." >&2; exit 1; }
   "$FF" "$(pwd)/always-on-netmon.xpi" >/dev/null 2>&1 &
-  echo "Sent the .xpi to $FF (confirm the prompt if Firefox shows one)."
+  echo "Sent the .xpi to $FF."
+  # Firefox may ask first: check that the installed copy in the profile is this build.
+  id=$(sed -n 's/^ *"id": *"\([^"]*@[^"]*\)".*/\1/p' manifest.json | head -1)
+  installed=$(ls -t "$HOME"/.config/mozilla/firefox/*/extensions/"$id".xpi "$HOME"/.mozilla/firefox/*/extensions/"$id".xpi 2>/dev/null | head -1)
+  if [ -z "$installed" ]; then
+    echo "Couldn't find the installed add-on in a Firefox profile to check. Confirm the prompt if Firefox shows one."
+  else
+    i=0
+    while ! cmp -s "$installed" always-on-netmon.xpi && [ $i -lt 30 ]; do
+      [ $i -eq 3 ] && echo "Waiting for Firefox: confirm its install prompt (Add)..."
+      sleep 1; i=$((i + 1))
+    done
+    if cmp -s "$installed" always-on-netmon.xpi; then echo "Installed in Firefox ($installed)."
+    else echo "NOT installed yet: Firefox is probably showing an install prompt. Confirm it, or run ./build.sh --install again." >&2; exit 2
+    fi
+  fi
 fi
