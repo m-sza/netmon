@@ -1131,6 +1131,51 @@ function previewResources(urls, tabId) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Search: which of the given requests contain a text, and where. scope "all"
+ * looks at everything; "received" only at what the server sent (response
+ * headers, bodies and WebSocket messages), for finding where a value came from.
+ * Returns [[id, places], ...], places in the order of the details tabs.
+ * ------------------------------------------------------------------------- */
+function searchEntries(ids, text, scope) {
+  if (!text || !Array.isArray(ids)) return [];
+  const re = NM.searchRegExp(String(text));
+  const has = (str) => { re.lastIndex = 0; return !!str && re.test(str); };
+  const hdrs = (list) => has((list || []).map((x) => `${x.name}: ${x.value}`).join("\n"));
+  const all = scope !== "received";
+  const out = [];
+  for (const id of ids) {
+    const e = entries.get(id);
+    if (!e) continue;
+    const where = [];
+    if (all && has(e.url)) where.push("url");
+    if (all && hdrs(e.requestHeaders)) where.push("requestHeaders");
+    if (hdrs(e.responseHeaders)) where.push("responseHeaders");
+    if (all && has(requestBodyText(e))) where.push("requestBody");
+    if (e.chunks.length && has(responseText(e))) where.push("responseBody");
+    if (e.ws && e.ws.messages.some((m) => m.op === 1 && (all || m.dir === "recv") && has(m.data))) where.push("messages");
+    if (where.length) out.push([id, where]);
+  }
+  return out;
+}
+function requestBodyText(e) {
+  const rb = e.requestBody;
+  if (!rb || rb.error) return "";
+  if (rb.formData) return Object.entries(rb.formData).flatMap(([k, vs]) => vs.map((v) => `${k}=${v}`)).join("\n");
+  return rb.raw ? NM.decodeText(rb.raw, NM.parseContentType(NM.header(e.requestHeaders, "content-type") || "").charset) : "";
+}
+// The response body as text, or "" for images, fonts, media and other binary data.
+function responseText(e) {
+  const buf = NM.concat(e.chunks);
+  const mime = NM.isGenericMime(e.mimeType) ? e.sniffedMime || e.mimeType : e.mimeType;
+  if (!NM.isTextMime(mime)) {
+    if (/^(image|font|audio|video)\/|woff|opentype|truetype|octet-stream|zip|pdf|wasm/.test(mime) && !/svg/.test(mime)) return "";
+    const head = new Uint8Array(buf, 0, Math.min(buf.byteLength, 1024));
+    if (head.includes(0)) return "";
+  }
+  return NM.decodeText(buf, e.charset);
+}
+
+/* ---------------------------------------------------------------------------
  * HAR export
  * ------------------------------------------------------------------------- */
 function harPostData(e) {
@@ -1477,6 +1522,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       updateBadge();
       broadcast({ type: "settings", settings: publicSettings() });
       return Promise.resolve(publicSettings());
+    case "search":
+      return Promise.resolve(searchEntries(msg.ids, msg.text, msg.scope));
     case "exportHar":
       return Promise.resolve(buildHar(msg.ids));
     case "resend": {

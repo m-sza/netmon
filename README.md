@@ -13,6 +13,8 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 - WebSocket traffic, including sending and editing-and-resending messages; HAR export includes WebSocket frames
 - Resend / edit and resend requests
 - Copy as cURL, fetch, Python `requests` and Python `curl_cffi`
+- Search across URLs, headers and bodies of the inspected tab (Ctrl+Shift+F); it finds values URL-encoded, JSON- or HTML-escaped too, and opens each result at the match
+- Trace a value: right-click a header, cookie, parameter or JSON value (or press T) → *Find where this came from* shows the earlier response that handed it out, e.g. the login response a token came from
 - DevTools-compatible filter language (`-mime-type:`, `transferred-larger-than:`, `is:blocked`, `size-larger-than:` …) in a rules editor (Ctrl+F)
 - Shows which extension blocked a request (e.g. "Blocked by uBlock Origin")
 - Initiator tree view (which script/stylesheet loaded what)
@@ -35,6 +37,8 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 | Ctrl+C, C, K, P / Shift+P | Copy the highlighted row, its value, its key, its JSON path (JavaScript / Python) |
 | Ctrl+R / F5 (Shift for a hard reload) | Reload the inspected tab |
 | Ctrl+F or / | Filter rules |
+| Ctrl+Shift+F | Search URLs, headers and bodies (Enter / Shift+Enter: next / previous result) |
+| T | Where did the highlighted value come from? |
 | Esc | Close the details |
 | ? | All shortcuts (also the ? button) |
 

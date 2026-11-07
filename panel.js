@@ -388,10 +388,14 @@ function matchesFilters(s) {
 }
 function checkFilters(s) {
   if (state.typeFilter !== "all" && category(s) !== state.typeFilter) return false;
-  if (state.tabFilter === "current") { if (state.originTabId != null && s.tabId !== state.originTabId) return false; }
-  else if (state.tabFilter === "none") { if (s.tabId >= 0) return false; }
-  else if (state.tabFilter !== "all" && String(s.tabId) !== state.tabFilter) return false;
+  if (!inTabScope(s)) return false;
   return NetFilter.matchAll(state.filterTokens, s, filterHelpers);
+}
+// The tab picked in the tab dropdown.
+function inTabScope(s) {
+  if (state.tabFilter === "current") return state.originTabId == null || s.tabId === state.originTabId;
+  if (state.tabFilter === "none") return !(s.tabId >= 0);
+  return state.tabFilter === "all" || String(s.tabId) === state.tabFilter;
 }
 
 // A request is in the time range if any part of it falls inside.
@@ -401,13 +405,14 @@ function inTimeRange(s, now = Date.now()) {
 }
 
 function matches(s) {
-  return matchesFilters(s) && inTimeRange(s);
+  return matchesFilters(s) && inTimeRange(s) && (!search || !search.hits || search.hits.has(s.id));
 }
 
 // The overview redraws (throttled) when requests or filters change; not on scrolling.
 const overviewChanged = () => { if (typeof Overview !== "undefined") Overview.invalidate(); };
 
 function applyFilters() {
+  if (search && search.scope !== state.tabFilter) { search.scope = state.tabFilter; scheduleSearch(null); }
   filterGen++;
   viewDirty = true;
   scheduleRefresh();
@@ -888,7 +893,9 @@ function applyBatch(list, removed) {
       }
     }
     if (s.id === state.selectedId && (!current || current.rev !== s.rev)) selectedChanged = true;
+    if (search && !search.trace && (isNew || prev.rev !== s.rev)) searchPending.add(s.id);
   }
+  if (searchPending.size) scheduleSearch(searchPending);
 
   scheduleRefresh();
   if (list.length || (removed && removed.length)) overviewChanged();
@@ -1092,6 +1099,202 @@ document.addEventListener("keydown", (ev) => {
     if (rulesPop.hidden) openRules(); else ruleAdd.focus();
   }
 }, true);
+/* ---------------------------------------------------------------------------
+ * Search (Ctrl+Shift+F, or the Search button): shows only the requests whose
+ * URL, headers or bodies contain a text, in the tab(s) the tab dropdown
+ * picks. The background searches the bodies it keeps. Opening a result goes
+ * to the details tab with the match, highlighted.
+ *
+ * Tracing ("Find where this came from", or T on a highlighted details row) is
+ * a search for one of a request's values among what the server sent before
+ * that request: response headers (Set-Cookie, Location, ...), bodies and
+ * WebSocket messages. The oldest hit is usually where the value came from.
+ * ------------------------------------------------------------------------- */
+const searchBar = $("search-bar");
+const searchInput = $("search-input");
+const searchCount = $("search-count");
+const searchTraceEl = $("search-trace");
+const searchBtn = $("btn-search");
+// { text, re, trace: { id, start, label } | null, hits: Map id -> places (null until the first answer), scope }
+let search = null;
+const searchPending = new Set(); // requests that changed since they were last searched
+let searchTimer = null;
+let searchSeq = 0;
+
+// The details tab that shows each place a search can match.
+const PLACE_TAB = { url: "headers", requestHeaders: "headers", responseHeaders: "headers", requestBody: "request", responseBody: "response", messages: "messages" };
+
+function openSearch() {
+  searchBar.hidden = false;
+  searchBtn.classList.add("active");
+  searchInput.focus();
+  searchInput.select();
+}
+function closeSearch() {
+  const trace = search && search.trace;
+  searchBar.hidden = true;
+  searchBtn.classList.remove("active");
+  searchInput.value = "";
+  setSearch("", null);
+  if (trace && store.has(trace.id)) select(trace.id); // back to the request the value came from
+}
+function setSearch(text, trace) {
+  const prev = search;
+  search = text ? {
+    text, trace, re: NM.searchRegExp(text), scope: state.tabFilter,
+    hits: prev && prev.trace === trace ? prev.hits : null, // keep showing the last results until the new ones arrive
+  } : null;
+  searchPending.clear();
+  updateSearchBar();
+  applyFilters();
+  if (search) scheduleSearch(null, 0);
+  if (state.selectedId != null && current) renderDetails(true); // repaint (or clear) the marks
+}
+// ids: a Set of requests to (re)search, or null for all of them.
+let searchFull = false; // the scheduled search covers every request
+function scheduleSearch(ids, delay = 300) {
+  clearTimeout(searchTimer);
+  if (ids === null) searchFull = true;
+  searchTimer = setTimeout(() => {
+    searchTimer = null;
+    const full = searchFull;
+    searchFull = false;
+    runSearch(full ? null : [...searchPending]);
+  }, delay);
+}
+async function runSearch(ids) {
+  const sr = search;
+  searchPending.clear();
+  if (!sr) return;
+  const seq = ++searchSeq;
+  const candidates = (ids ? ids.map((id) => store.get(id)).filter(Boolean) : [...store.values()])
+    .filter((s) => inTabScope(s) && (!sr.trace || (s.id !== sr.trace.id && s.start <= sr.trace.start)));
+  let res;
+  try {
+    res = await browser.runtime.sendMessage({ cmd: "search", ids: candidates.map((s) => s.id), text: sr.text, scope: sr.trace ? "received" : "all" });
+  } catch (err) { toast(`Search failed: ${err.message || err}`); return; }
+  if (search !== sr) return;
+  if (!ids) {
+    if (seq !== searchSeq) return;
+    sr.hits = new Map(res);
+  } else {
+    if (!sr.hits) return;
+    for (const id of ids) sr.hits.delete(id);
+    for (const [id, places] of res) sr.hits.set(id, places);
+  }
+  applyFilters();
+  updateSearchBar();
+  if (!ids && sr.trace && !sr.hits.size && sr.trace.parts.length) {
+    const [part, ...rest] = sr.trace.parts;
+    searchInput.value = part;
+    setSearch(part, { ...sr.trace, parts: rest });
+    return;
+  }
+  if (!ids && sr.trace && !sr.jumped) {
+    sr.jumped = true;
+    const first = [...sr.hits.keys()].map((id) => store.get(id)).filter((s) => s && matches(s)).sort((a, b) => a.start - b.start)[0];
+    if (first) select(first.id);
+  } else if (state.selectedId != null && current && sr.hits.has(current.id)) renderDetails(true);
+}
+function updateSearchBar() {
+  const sr = search;
+  searchTraceEl.hidden = !(sr && sr.trace);
+  if (sr && sr.trace) {
+    const cut = (t) => (t.length > 40 ? t.slice(0, 40) + "…" : t);
+    const what = sr.text === sr.trace.whole ? `“${cut(sr.text)}”` : `“${cut(sr.text)}” (part of “${cut(sr.trace.whole)}”)`;
+    searchTraceEl.replaceChildren(`Where did ${what} come from? Server responses before`,
+      h("a", { href: "#", class: "link", title: "Back to this request", onclick: (e) => { e.preventDefault(); closeSearch(); } }, sr.trace.label));
+    searchTraceEl.title = sr.text;
+  }
+  searchCount.classList.remove("none");
+  if (!sr) { searchCount.textContent = ""; return; }
+  if (!sr.hits || (sr.trace && !sr.hits.size && sr.trace.parts.length)) { searchCount.textContent = "Searching…"; return; }
+  const n = sr.hits.size;
+  let shown = 0;
+  for (const id of sr.hits.keys()) { const s = store.get(id); if (s && matchesFilters(s) && inTimeRange(s)) shown++; }
+  if (!n) {
+    searchCount.classList.add("none");
+    searchCount.textContent = sr.trace
+      ? (sr.trace.whole !== sr.text || traceParts(sr.trace.whole).length ? "Neither it nor its parts are in any earlier response." : "Not in any earlier response.") + " A script may compute it, it may be kept from an earlier visit (a cookie or storage), or it was in a body that wasn't captured."
+      : "No requests contain this";
+    searchCount.title = searchCount.textContent;
+    return;
+  }
+  searchCount.textContent = `${n} ${n === 1 ? "request" : "requests"}` + (shown < n ? ` (${n - shown} hidden by other filters)` : "");
+  searchCount.title = "";
+}
+// Before rendering a result: go to a details tab that has a match, unless the one shown has one.
+function searchDetailsTab(d) {
+  const places = search && search.hits && search.hits.get(d.id);
+  if (!places) return;
+  const tabs = places.map((p) => PLACE_TAB[p]);
+  if (!tabs.includes(state.detailsTab)) state.detailsTab = tabs[0];
+}
+// After rendering: mark the matches. Bodies use their Find box (which also
+// opens collapsed JSON); the rest gets painted. Returns whether it scrolled.
+function paintSearch(reveal) {
+  if (!search || !search.hits || !current || !search.hits.has(current.id)) return false;
+  let revealed = false;
+  for (const el of detailsBody.querySelectorAll(".find")) {
+    if (!el.getClientRects().length) continue;
+    const ctl = findCtl.get(el);
+    if (ctl && ctl.setQuery(search.text, search.re, reveal)) revealed = reveal;
+  }
+  if (!canHighlight) return revealed;
+  const ranges = textRanges(detailsBody, search.re, 2000, Infinity, ".body-view, .actions");
+  if (ranges.length) CSS.highlights.set("nm-search", new Highlight(...ranges));
+  if (reveal && !revealed && ranges.length) { revealInDetails(ranges[0].getBoundingClientRect(), true); revealed = true; }
+  return revealed;
+}
+// T on a highlighted details row, or "Find where this came from" in its menu.
+function traceValue(value) {
+  const anchor = state.selectedId != null ? store.get(state.selectedId) : null;
+  if (!anchor) return;
+  value = String(value);
+  if (value.trim().length < 3) { toast("Too short to trace: it would match almost everything"); return; }
+  searchBar.hidden = false;
+  searchBtn.classList.add("active");
+  searchInput.value = value;
+  setSearch(value, { id: anchor.id, start: anchor.start, label: `${anchor.method} ${fileName(anchor.url)}`, whole: value, parts: traceParts(value) });
+}
+// When a whole value isn't in any response, its distinctive parts may be:
+// the token in "Bearer <token>", each value of a Cookie header or a query
+// string. Longest first; scheme words and short pieces are left out.
+function traceParts(value) {
+  const parts = new Set(value.split(/[\s;,&]+/).flatMap((p) => [p, ...p.split("=").slice(1)]).map((p) => p.trim()));
+  return [...parts].filter((p) => p.length >= 6 && p !== value && !/^(bearer|basic|digest|token)$/i.test(p)).sort((a, b) => b.length - a.length);
+}
+
+searchBtn.addEventListener("click", () => (searchBar.hidden ? openSearch() : closeSearch()));
+$("search-close").addEventListener("click", closeSearch);
+let searchInputTimer = null;
+searchInput.addEventListener("input", () => {
+  clearTimeout(searchInputTimer);
+  searchInputTimer = setTimeout(() => {
+    const text = searchInput.value;
+    // Edited while tracing: still among the earlier responses, but no switching to parts of what was typed.
+    if (!search || text !== search.text) setSearch(text, search && search.trace && text ? { ...search.trace, whole: text, parts: [] } : null);
+  }, 250);
+});
+searchInput.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeSearch(); return; }
+  if (ev.key === "Enter") {
+    // Opens the next (Shift: previous) request found.
+    ev.preventDefault();
+    if (viewDirty) rebuildView();
+    if (!view.length) return;
+    const at = state.selectedId != null && viewPos.has(state.selectedId) ? viewPos.get(state.selectedId) : -1;
+    const i = at < 0 ? (ev.shiftKey ? view.length - 1 : 0) : (at + (ev.shiftKey ? -1 : 1) + view.length) % view.length;
+    select(view[i]);
+  }
+});
+document.addEventListener("keydown", (ev) => {
+  if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && !ev.altKey && (ev.key === "f" || ev.key === "F")) {
+    ev.preventDefault();
+    openSearch();
+  }
+}, true);
+
 $("rules-all-on").addEventListener("click", () => { for (const r of filterRules) r.enabled = true; saveRules(); });
 $("rules-all-off").addEventListener("click", () => { for (const r of filterRules) r.enabled = false; saveRules(); });
 $("rules-copy").addEventListener("click", (ev) => copyText(filterRules.filter((r) => r.enabled).map((r) => r.text).join(" "), ev.currentTarget));
@@ -1620,6 +1823,7 @@ document.addEventListener("keydown", (ev) => {
     // selected), C the value, K the key, P the path (Shift+P: Python).
     if (hasDetailsCursor()) {
       if (accel && !ev.shiftKey && letter === "c" && !String(getSelection())) { ev.preventDefault(); copyFromDetailsCursor("row"); return; }
+      if (plain && !ev.shiftKey && letter === "t") { ev.preventDefault(); traceFromDetailsCursor(); return; }
       const what = plain && (letter === "c" && !ev.shiftKey ? "value" : letter === "k" && !ev.shiftKey ? "key" : letter === "p" ? (ev.shiftKey ? "pypath" : "path") : null);
       if (what) { ev.preventDefault(); copyFromDetailsCursor(what); return; }
     }
@@ -1835,6 +2039,7 @@ function revokeBlobs() {
 
 function renderDetails(keepScroll) {
   const scroll = detailsBody.scrollTop;
+  if (!keepScroll && current) searchDetailsTab(current);
   // Where the highlighted row sits, so the same row of the next request can
   // land in the same place (see stickyRows).
   const cursorTop = hasDetailsCursor() ? detailsCursor.getBoundingClientRect().top - detailsBody.getBoundingClientRect().top : null;
@@ -1860,6 +2065,7 @@ function renderDetails(keepScroll) {
   if (keepScroll) detailsBody.scrollTop = scroll;
   const sticky = stickyRows.get(state.detailsTab);
   const again = sticky ? findStickyRow(sticky) : null;
+  paintSearch(!keepScroll && !again);
   if (again) {
     setDetailsCursor(again, cursorTop == null && !keepScroll);
     if (!keepScroll && cursorTop != null) detailsBody.scrollTop += again.getBoundingClientRect().top - detailsBody.getBoundingClientRect().top - cursorTop;
@@ -1895,6 +2101,8 @@ detailsBody.addEventListener("contextmenu", (ev) => {
     openMenu(ev.clientX, ev.clientY, [
       { label: "Copy Value", run: () => copy(value, "Value copied") },
       { label: "Copy Row", run: () => copy(`${name}: ${value}`, "Row copied") },
+      "-",
+      { label: "Find Where This Came From", run: () => traceValue(value) },
     ], ev.target);
     return;
   }
@@ -1904,6 +2112,8 @@ detailsBody.addEventListener("contextmenu", (ev) => {
     { label: "Copy Value", run: () => copy(value, "Value copied") },
     { label: `Copy ${Noun}`, run: () => copy(kind === "header" ? `${name}: ${value}` : `${name}=${value}`, `${Noun} copied`) },
     row.setCookie && { label: "Copy Set-Cookie Value", run: () => copy(row.setCookie, "Set-Cookie value copied") },
+    "-",
+    { label: "Find Where This Came From", run: () => traceValue(value) },
   ], ev.target);
 });
 
@@ -2354,6 +2564,8 @@ function jsonMenu(ev, tree) {
     "-",
     { label: "Copy Path (JavaScript)", disabled: !e.path, run: () => copy(e.path, "Path copied") },
     { label: "Copy Path (Python)", disabled: !e.pythonPath, run: () => copy(e.pythonPath, "Path copied") },
+    "-",
+    { label: "Find Where This Came From", disabled: e.isSection, run: () => traceValue(e.value()) },
   ], ev.target);
 }
 
@@ -2366,15 +2578,15 @@ const findCtl = new WeakMap(); // .find element -> { focus, next, prev }
 const jsonTrees = new WeakMap(); // .jtree element -> its JsonTree viewer
 const canHighlight = typeof CSS !== "undefined" && !!CSS.highlights && typeof Highlight === "function";
 function clearFindHighlights() {
-  if (canHighlight) { CSS.highlights.delete("nm-find"); CSS.highlights.delete("nm-find-current"); }
+  if (canHighlight) { CSS.highlights.delete("nm-find"); CSS.highlights.delete("nm-find-current"); CSS.highlights.delete("nm-search"); }
 }
 
 // Ranges of the matches of `re` in the text under root, looking at its first
 // `len` characters. Text nodes are joined first, so a match can span syntax colors.
-function textRanges(root, re, limit, len = Infinity) {
-  const inTree = !!root.closest(".jtree");
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, inTree
-    ? { acceptNode: (n) => (n.parentElement.closest(".jt-summary") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) }
+function textRanges(root, re, limit, len = Infinity, skip = null) {
+  if (!skip && root.closest(".jtree")) skip = ".jt-summary";
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, skip
+    ? { acceptNode: (n) => (n.parentElement.closest(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) }
     : null);
   const nodes = [], starts = [];
   let text = "";
@@ -2421,6 +2633,7 @@ function createFinder(pre, tree, mode, toSource) {
   const count = h("span", { class: "find-count" });
   const el = h("span", { class: "find" }, input, count);
   let matches = [], cur = -1, re = null, timer = null;
+  let given = null; // { text, re, reveal } from the request search, used while the box still holds that text
 
   const paint = (scroll) => {
     clearFindHighlights();
@@ -2450,7 +2663,8 @@ function createFinder(pre, tree, mode, toSource) {
     clearTimeout(timer);
     timer = null;
     const q = input.value;
-    re = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi") : null;
+    if (given && given.text !== q) given = null;
+    re = !q ? null : given ? given.re : new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
     matches = [];
     cur = -1;
     if (re && mode() === "preview") { toSource(); return; } // shows the source, which runs this again
@@ -2458,7 +2672,8 @@ function createFinder(pre, tree, mode, toSource) {
       matches = mode() === "tree" ? tree.find(re, FIND_LIMIT) : textRanges(pre, re, FIND_LIMIT);
       if (matches.length) cur = 0;
     }
-    paint(true);
+    paint(!given || given.reveal);
+    if (given) given.reveal = true;
   };
   const go = (dir) => {
     if (timer) { run(); return; }
@@ -2472,7 +2687,11 @@ function createFinder(pre, tree, mode, toSource) {
     if (ev.key === "Enter") { ev.preventDefault(); go(ev.shiftKey ? -1 : 1); }
     else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); input.value = ""; run(); input.blur(); }
   });
-  findCtl.set(el, { focus: () => { input.focus(); input.select(); }, next: () => go(1), prev: () => go(-1) });
+  findCtl.set(el, {
+    focus: () => { input.focus(); input.select(); }, next: () => go(1), prev: () => go(-1),
+    // Search for `text` with the pattern `re` (from the request search). Returns whether it found any.
+    setQuery: (text, pattern, reveal) => { input.value = text; given = { text, re: pattern, reveal }; run(); return matches.length > 0; },
+  });
   return { el, refresh: () => { if (input.value || re) run(); } };
 }
 
@@ -2569,6 +2788,13 @@ function copyFromDetailsCursor(what) {
     else toast("The top level has no key");
   } else if (!e.path) toast("The top level has no path");
   else copy(what === "pypath" ? e.pythonPath : e.path, "Path copied");
+}
+function traceFromDetailsCursor() {
+  const el = detailsCursor;
+  if (el.tagName === "TR") { traceValue(kvRows.get(el).value); return; }
+  const e = jsonTrees.get(el.closest(".jtree")).entryAt(el);
+  if (!e || e.isSection) toast("Pick a single value to trace, not a whole section");
+  else traceValue(e.value());
 }
 detailsBody.addEventListener("click", (ev) => {
   if (String(getSelection())) return; // selecting text, not picking a row

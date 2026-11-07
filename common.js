@@ -140,4 +140,16 @@ const NM = {
     }
     return out;
   },
+
+  /* Search pattern for a value as it may appear elsewhere: as typed, URL-
+   * encoded (with %20 or +), escaped inside a JSON string, or HTML-escaped.
+   * Case-insensitive. Global, so it can also find every match. */
+  searchRegExp(text) {
+    const html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    let url = text;
+    try { url = encodeURIComponent(text); } catch { /* lone surrogate */ }
+    const variants = new Set([text, url, url.replace(/%20/g, "+"), JSON.stringify(text).slice(1, -1), html]);
+    const esc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp([...variants].filter(Boolean).sort((a, b) => b.length - a.length).map(esc).join("|"), "gi");
+  },
 };

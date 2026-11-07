@@ -34,6 +34,7 @@
     </button>
     <span class="sep"></span>
     <button id="btn-rules" class="text-btn" aria-haspopup="dialog">Rules</button>
+    <button id="btn-search" class="text-btn" title="Search URLs, headers and bodies of the requests shown (Ctrl+Shift+F)">Search</button>
     <span class="sep"></span>
     <div id="view-mode" class="seg" title="List: requests in order. Tree: each request under the one that caused it.">
       <button data-mode="list" class="active">List</button>
@@ -92,6 +93,7 @@
         <h3>Anywhere</h3>
         <dl>
           <dt><kbd class="mod">Ctrl</kbd> <kbd>F</kbd> / <kbd>/</kbd></dt><dd>Filter rules</dd>
+          <dt><kbd class="mod">Ctrl</kbd> <kbd>Shift</kbd> <kbd>F</kbd></dt><dd>Search URLs, headers and bodies (<kbd>Enter</kbd>: next result)</dd>
           <dt><kbd class="mod">Ctrl</kbd> <kbd>R</kbd> / <kbd>F5</kbd></dt><dd>Reload the inspected tab (with <kbd>Shift</kbd>: bypass the cache)</dd>
           <dt><kbd>?</kbd></dt><dd>This list</dd>
         </dl>
@@ -123,6 +125,7 @@
           <dt><kbd class="mod">Ctrl</kbd> <kbd>C</kbd></dt><dd>Copy the row</dd>
           <dt><kbd>C</kbd> / <kbd>K</kbd></dt><dd>Copy the value / the key</dd>
           <dt><kbd>P</kbd> / <kbd>Shift</kbd> <kbd>P</kbd></dt><dd>Copy the JSON path (JavaScript / Python)</dd>
+          <dt><kbd>T</kbd></dt><dd>Find where this value came from</dd>
           <dt><kbd>Esc</kbd></dt><dd>Drop the highlight</dd>
         </dl>
       </section>
@@ -144,6 +147,15 @@
       <span class="spacer"></span>
       <button id="rules-clear" class="text-btn">Remove all</button>
     </div>
+  </div>
+
+  <div id="search-bar" hidden>
+    <span id="search-trace" hidden></span>
+    <input id="search-input" type="text" spellcheck="false" placeholder="Search URLs, headers and bodies" aria-label="Search requests"
+           title="Shows only the requests whose URL, headers or bodies contain this (also URL-encoded, JSON- or HTML-escaped). Case-insensitive. Enter / Shift+Enter: open the next / previous one. Esc: close.">
+    <span id="search-count"></span>
+    <span class="spacer"></span>
+    <button id="search-close" class="icon-btn" title="Close the search (Esc)" aria-label="Close the search">×</button>
   </div>
 
   <div id="overview" hidden>
