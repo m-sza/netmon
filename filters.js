@@ -3,7 +3,7 @@
 /* The request filter language of Firefox DevTools' network panel, matched
  * against our request summaries (see devtools/client/netmonitor/src/utils/
  * filter-text-utils.js), so filters copied from DevTools behave the same.
- * Additions: is:blocked, is:error, size-larger-than: (a clearer name for
+ * Additions: is:blocked, is:error, is:graphql, operation: (GraphQL operation name or type), size-larger-than: (a clearer name for
  * larger-than:, which compares the content size, so cached responses count),
  * and /regex/ as a URL regex (the monitor's older syntax). A token whose key isn't a filter key is plain URL text, as in
  * DevTools. */
@@ -12,7 +12,7 @@ const NetFilter = (() => {
     "status-code", "method", "domain", "url", "protocol", "scheme", "remote-ip", "cause", "initiator",
     "transferred", "size", "priority", "set-cookie-domain", "set-cookie-name", "set-cookie-value",
     "mime-type", "larger-than", "transferred-larger-than", "is", "has-response-header", "regexp",
-    "size-larger-than",
+    "size-larger-than", "operation",
   ];
   const SIZE_FLAGS = new Set(["size", "transferred", "larger-than", "transferred-larger-than", "size-larger-than"]);
   const STATUS_CODES = "100 101 103 200 201 202 203 204 205 206 300 301 302 303 304 307 308 400 401 403 404 405 406 407 408 409 410 411 412 413 414 415 416 417 418 422 425 426 428 429 431 451 500 501 502 503 504 505 511".split(" ");
@@ -94,6 +94,8 @@ const NetFilter = (() => {
       case "set-cookie-name": m = (s.setCookies || []).some((c) => c.name.toLowerCase().includes(value)); break;
       case "set-cookie-value": m = (s.setCookies || []).some((c) => c.value.toLowerCase().includes(value)); break;
       case "set-cookie-domain": m = (s.setCookies || []).some((c) => (c.domain || (getUrl() ? getUrl().host : "")).includes(value)); break;
+      // GraphQL operations: their name, or their type (query, mutation, subscription).
+      case "operation": m = (s.gql || []).some((o) => (o.name || "").toLowerCase().includes(value) || o.type === value); break;
       case "regexp": try { m = new RegExp(value).test(s.url); } catch { m = false; } break;
       case "priority": m = false; break;           // Firefox doesn't give extensions request priorities
       case "is":
@@ -101,6 +103,7 @@ const NetFilter = (() => {
         else if (value === "running") m = s.status == null && s.state === "pending";
         else if (value === "blocked") m = h.blocked(s);
         else if (value === "error") m = s.state === "error" || (s.status ?? 0) >= 400;
+        else if (value === "graphql") m = !!s.gql;
         else m = true;
         break;
       default: m = true;                            // "url:" has no matcher in DevTools either

@@ -152,4 +152,80 @@ const NM = {
     const esc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return new RegExp([...variants].filter(Boolean).sort((a, b) => b.length - a.length).map(esc).join("|"), "gi");
   },
+
+  /* GraphQL operations in a request, or null: a JSON body (or GET query
+   * string) with a "query" string, or a persisted query (only its hash and
+   * operation name are sent). Batches are arrays. Each operation:
+   * { type: "query" | "mutation" | "subscription", name, query, variables, extensions }. */
+  graphqlRequest(url, bodyText) {
+    const parse = (t) => { try { return t ? JSON.parse(t) : null; } catch { return null; } };
+    let payload = bodyText && /^\s*[[{]/.test(bodyText) ? parse(bodyText) : null;
+    if (!payload) {
+      const u = NM.safeUrl(url);
+      const q = u && u.searchParams;
+      if (q && (q.has("query") || (q.has("operationName") && q.has("extensions")))) {
+        payload = { query: q.get("query"), operationName: q.get("operationName"), variables: parse(q.get("variables")), extensions: parse(q.get("extensions")) };
+      }
+    }
+    const list = Array.isArray(payload) ? payload : payload ? [payload] : [];
+    const ops = [];
+    for (const p of list) {
+      if (!p || typeof p !== "object") continue;
+      const persisted = !!(p.extensions && p.extensions.persistedQuery);
+      if (typeof p.query !== "string" && !persisted) continue;
+      const query = typeof p.query === "string" ? p.query : "";
+      const name = typeof p.operationName === "string" && p.operationName ? p.operationName : null;
+      const plain = query.replace(/#[^\n]*/g, "");
+      // The operation's type: from its definition (the named one, when there are several).
+      const def = name ? new RegExp(`\\b(query|mutation|subscription)\\s+${name}\\b`).exec(plain) : null;
+      const first = /^\s*(query|mutation|subscription)\b\s*([_A-Za-z][_0-9A-Za-z]*)?/.exec(plain);
+      ops.push({
+        type: def ? def[1] : first ? first[1] : "query",
+        name: name || (first && first[2]) || null,
+        query, variables: p.variables ?? null, extensions: p.extensions ?? null, persisted,
+      });
+    }
+    return ops.length ? ops : null;
+  },
+
+  // A GraphQL document laid out one selection per line, indented by nesting.
+  // Arguments stay on their line; strings, block strings and comments are kept.
+  formatGraphql(q) {
+    let out = "", depth = 0, paren = 0, line = "";
+    const nl = () => { if (line.trim()) out += "  ".repeat(depth) + line.trim() + "\n"; line = ""; };
+    for (let i = 0; i < q.length; i++) {
+      const c = q[i];
+      if (c === '"') {
+        const block = q.startsWith('"""', i);
+        let j = i + (block ? 3 : 1);
+        if (block) { j = q.indexOf('"""', j); j = j < 0 ? q.length : j + 3; }
+        else { while (j < q.length && q[j] !== '"') j += q[j] === "\\" ? 2 : 1; j++; }
+        line += q.slice(i, j);
+        i = j - 1;
+      } else if (c === "#") {
+        const j = q.indexOf("\n", i);
+        line += q.slice(i, j < 0 ? q.length : j);
+        nl();
+        i = j < 0 ? q.length : j;
+      } else if (paren) {
+        if (c === "(") paren++;
+        else if (c === ")") paren--;
+        if (c === ":" || c === ",") { line = line.trimEnd() + c + " "; while (/[ \t\r\n]/.test(q[i + 1] || "")) i++; }
+        else line += /\s/.test(c) ? (line.endsWith(" ") || line.endsWith("(") ? "" : " ") : c;
+      } else if (c === "(") { paren = 1; line += c; }
+      else if (c === "{") { line = line.trimEnd() + " {"; nl(); depth++; }
+      else if (c === "}") { nl(); depth = Math.max(0, depth - 1); line = "}"; nl(); }
+      else if (c === "," || c === "\n" || c === "\r") nl();
+      else if (/\s/.test(c)) { if (line.trim() && !line.endsWith(" ")) line += " "; }
+      else {
+        // A new selection starts after a finished one: "a b" on one line is two fields.
+        const word = (/^[_A-Za-z][_0-9A-Za-z]*/.exec(q.slice(i, i + 64)) || [""])[0];
+        if (/[_A-Za-z.]/.test(c) && word !== "on" && /[_0-9A-Za-z)\]!] $/.test(line) &&
+            !/(\b(on|query|mutation|subscription|fragment)|:|=|@\w+|\.\.\.) $/.test(line)) nl();
+        line += c;
+      }
+    }
+    nl();
+    return out.trimEnd();
+  },
 };

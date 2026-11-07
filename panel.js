@@ -436,7 +436,7 @@ function buildRow() {
     const td = document.createElement("td");
     td.className = "c-" + c;
     if (c === "waterfall") td.append(h("div", { class: "bar" }, h("div", { class: "bar-wait" })));
-    if (c === "file") td.append(h("span", { class: "twisty" }), makeIcon(), h("span", { class: "fname" }), h("span", { class: "tguides" }));
+    if (c === "file") td.append(h("span", { class: "twisty" }), makeIcon(), h("span", { class: "fname" }), h("span", { class: "gql-op" }), h("span", { class: "tguides" }));
     tr.append(td);
   }
   return tr;
@@ -458,7 +458,14 @@ function fillRow(tr, s) {
   cDomain.textContent = u ? u.host : "";
   cDomain.title = u ? u.origin : "";
 
-  cFile.querySelector(".fname").textContent = fileName(s.url);
+  // GraphQL GETs carry the whole query in the URL; the operation name says it better.
+  cFile.querySelector(".fname").textContent = s.gql && u ? (u.pathname.split("/").pop() || "/") : fileName(s.url);
+  // GraphQL: the operation's name (or how many, for a batch); mutations stand out.
+  const op = cFile.querySelector(".gql-op");
+  const ops = s.gql;
+  setIfChanged(op, "textContent", !ops ? "" : ops.length > 1 ? `${ops.length} operations` : ops[0].name || `(${ops[0].type})`);
+  setIfChanged(op, "className", "gql-op" + (ops && ops.some((o) => o.type === "mutation") ? " mutation" : ""));
+  setIfChanged(op, "title", ops ? ops.map((o) => `${o.type} ${o.name || "(anonymous)"}`).join("\n") : "");
   cFile.title = s.url;
   const kind = iconKind(s);
   if (cFile.dataset.icon !== kind) {
@@ -2342,9 +2349,15 @@ function renderRequest(d) {
   const out = [];
   const u = safeUrl(d.url);
   const params = u ? [...u.searchParams] : [];
-  if (params.length) out.push(section("Query string", params.length, kvTable(params, "param")));
-
   const rb = d.requestBody;
+  // GraphQL: each operation with its query (formatted, collapsible) and
+  // variables; the raw query string and payload follow, collapsed.
+  const ct0 = parseContentType(header(d.requestHeaders, "content-type"));
+  const ops = d.gql ? NM.graphqlRequest(d.url, rb && rb.raw ? decodeText(rb.raw, ct0.charset) : "") : null;
+  if (ops) for (const op of ops) out.push(graphqlSection(op, d));
+  const fold = (sec) => { if (ops) sec.open = false; return sec; };
+  if (params.length) out.push(fold(section("Query string", params.length, kvTable(params, "param"))));
+
   if (!rb) {
     out.push(note(params.length ? "No request body." : "This request has no query string or body."));
   } else if (rb.error) {
@@ -2357,9 +2370,22 @@ function renderRequest(d) {
     const content = [bodyView(rb.raw, ct.mime, ct.charset, d.url)];
     if (rb.truncated) content.unshift(note(`Only the first ${fmtBytes(rb.raw.byteLength)} were captured.`));
     if (rb.files && rb.files.length) content.push(note(`Uploaded file(s): ${rb.files.join(", ")}`));
-    out.push(section(`Request payload`, null, ...content));
+    out.push(fold(section(`Request payload`, null, ...content)));
   }
   return out;
+}
+
+function graphqlSection(op, d) {
+  const enc = (t) => new TextEncoder().encode(t).buffer;
+  const content = [];
+  if (op.query) content.push(bodyView(enc(op.query), "application/graphql", "utf-8", d.url));
+  else if (op.persisted) {
+    const hash = op.extensions.persistedQuery.sha256Hash;
+    content.push(note(`A persisted query: only its hash was sent${hash ? ` (sha256 ${String(hash).slice(0, 16)}…)` : ""}, the query itself is stored on the server.`));
+  }
+  if (op.variables != null) content.push(h("div", { class: "sub-label" }, "Variables"), bodyView(enc(JSON.stringify(op.variables)), "application/json", "utf-8", d.url));
+  const title = h("span", null, "GraphQL ", h("span", { class: "gql-type" }, op.type), " ", op.name || "(anonymous)");
+  return section(title, null, ...content);
 }
 
 /* Response tab */
@@ -2381,6 +2407,13 @@ function renderResponse(d) {
   if (d.bodyState === "partial") out.push(note("The response was interrupted. Showing what arrived before it stopped.", "warn"));
   if (d.bodyState === "error") out.push(note(`Couldn't read the response body${d.bodyError ? `: ${d.bodyError}` : ""}.`, "warn"));
 
+  if (body && body.byteLength && d.gql) {
+    let errors = null;
+    try { const j = JSON.parse(decodeText(body, ct.charset || d.charset)); errors = [].concat(j).flatMap((x) => (x && Array.isArray(x.errors) ? x.errors : [])); } catch { /* not JSON */ }
+    if (errors && errors.length) {
+      out.push(note(`GraphQL ${errors.length === 1 ? "error" : `errors (${errors.length})`}: ${errors.map((e) => (e && e.message) || JSON.stringify(e)).join(" · ")}`, "warn"));
+    }
+  }
   if (body && body.byteLength) {
     out.push(bodyView(body, ct.mime, ct.charset || d.charset, d.url, { tabId: d.tabId, key: `${d.id}:${d.rev}` }));
   } else if (BODY_NOTES[d.bodyState]) {
@@ -2576,7 +2609,7 @@ function bodyView(buf, mime, charset, url, ctx) {
   const limitNote = note(`Showing the first ${TEXT_LIMIT.toLocaleString()} characters.`);
   const plainNote = note("Syntax highlighting is off for bodies this large.");
   // JS, CSS and HTML: formatted, collapsible code (formatted in a worker the first time it shows).
-  const codeLang = (lang === "js" || lang === "css" || lang === "html") && text.length <= TEXT_LIMIT;
+  const codeLang = (lang === "js" || lang === "css" || lang === "html" || lang === "graphql") && text.length <= TEXT_LIMIT;
   const codeBox = codeLang ? h("div", { class: "code-box" }) : null;
   let code = null;
   let codeStarted = false;
@@ -2771,6 +2804,7 @@ function hashText(t) { // FNV-1a
   return (x >>> 0).toString(36);
 }
 function formatCode(text, lang) {
+  if (lang === "graphql") return Promise.resolve({ text: NM.formatGraphql(text) }); // small, and not js-beautify's
   const key = `${lang}:${text.length}:${hashText(text)}`;
   const hit = formatCache.get(key);
   if (hit) { formatCache.delete(key); formatCache.set(key, hit); return hit; }

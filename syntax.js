@@ -266,10 +266,29 @@ const Syntax = (() => {
   }
 
   /* ---------------- public API ---------------- */
-  const LABELS = { json: "JSON", js: "JavaScript", css: "CSS", html: "HTML", xml: "XML", form: "Form data", text: "Text" };
+  /* ---------------- GraphQL ---------------- */
+  const GQL_KW = new Set("query mutation subscription fragment on true false null schema type input enum interface union scalar extend directive implements repeatable".split(" "));
+  const GQL_RE = /(#[^\n]*)|("""[\s\S]*?"""|"(?:[^"\\\n]|\\.)*")|(\$[_A-Za-z][_0-9A-Za-z]*)|(@[_A-Za-z][_0-9A-Za-z]*)|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|([_A-Za-z][_0-9A-Za-z]*)(\s*:)?|(\.\.\.|[{}()[\]:=!|&,])|(\s+)|([\s\S])/y;
+  function graphql(text, out) {
+    scan(text, GQL_RE, out, (m) => {
+      if (m[1]) out.push("com", m[1]);
+      else if (m[2]) out.push("str", m[2]);
+      else if (m[3]) out.push("val", m[3]);
+      else if (m[4]) out.push("fn", m[4]);
+      else if (m[5]) out.push("num", m[5]);
+      else if (m[6]) {
+        if (m[7]) { out.push("key", m[6]); out.push("punc", m[7]); }
+        else out.push(GQL_KW.has(m[6]) ? "kw" : null, m[6]);
+      } else if (m[8]) out.push("punc", m[8]);
+      else out.push(null, m[0]);
+    });
+  }
+
+  const LABELS = { json: "JSON", js: "JavaScript", css: "CSS", html: "HTML", xml: "XML", form: "Form data", graphql: "GraphQL", text: "Text" };
 
   function langFor(mime, url, text) {
     mime = mime || "";
+    if (/graphql/.test(mime)) return "graphql";
     if (/json/.test(mime)) return "json";
     if (/javascript|ecmascript/.test(mime)) return "js";
     if (/css/.test(mime)) return "css";
@@ -303,6 +322,7 @@ const Syntax = (() => {
       case "html": markup(text, out, true); break;
       case "xml": markup(text, out, false); break;
       case "form": form(text, out); break;
+      case "graphql": graphql(text, out); break;
       default: out.push(null, text);
     }
     return out.done();

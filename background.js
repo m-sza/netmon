@@ -1219,6 +1219,7 @@ function summarize(e) {
     blocked: e.blocked,
     resent: e.resent,
     wsCount: e.ws ? e.ws.sent + e.ws.received : null,
+    gql: graphqlOps(e),
     // For the has-response-header: and set-cookie-*: filters.
     responseHeaderNames: e.responseHeaders.map(h => h.name.toLowerCase()),
     setCookies: NM.parseSetCookies(NM.headerAll(e.responseHeaders, "set-cookie")).map(c => ({
@@ -1364,6 +1365,15 @@ function siteOf(url) {
   const labels = host.split(".");
   const n = /^(co|com|net|org|gov|ac|edu|ne|or|go)$/.test(labels[labels.length - 2] || "") && labels[labels.length - 1].length === 2 ? 3 : 2;
   return labels.slice(-n).join(".");
+}
+
+// GraphQL operations of a request (type and name only), worked out once.
+function graphqlOps(e) {
+  if (e.gql === undefined) {
+    const ops = e.method === "GET" || e.method === "POST" ? NM.graphqlRequest(e.url, requestBodyText(e)) : null;
+    e.gql = ops && ops.map((o) => ({ type: o.type, name: o.name }));
+  }
+  return e.gql;
 }
 
 function requestBodyText(e) {

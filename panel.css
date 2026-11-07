@@ -887,3 +887,11 @@ table.kv tr.dcursor td:last-child { box-shadow: inset 0 1px var(--accent), inset
 table.kv td .note.cookie-attrs, table.kv td .note.cookie-origin { padding: 1px 0 0; font-family: var(--ui); }
 table.kv td .note.cookie-origin { word-break: normal; }
 table.kv td .note.cookie-origin:empty { display: none; }
+
+/* GraphQL: the operation name after the file name in the list */
+#rows .gql-op { margin-left: 6px; color: var(--tok-fn); }
+#rows .gql-op.mutation { color: var(--tok-kw); }
+#rows .gql-op:empty { display: none; }
+#rows tr.selected .gql-op { color: inherit; opacity: 0.85; }
+.gql-type { color: var(--muted); font-weight: normal; }
+.sub-label { margin: 8px 0 0; color: var(--muted); font-weight: 600; }
