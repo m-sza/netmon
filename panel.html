@@ -64,6 +64,9 @@
     <label class="check" title="Capture response bodies for new requests">
       <input type="checkbox" id="opt-bodies"> Capture bodies
     </label>
+    <button id="btn-hook" class="icon-btn" aria-haspopup="dialog" aria-label="Page hook">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 2v3M10 2v3M4.5 5h7v2.5a3.5 3.5 0 0 1-7 0zM8 11v3" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path class="hook-off-slash" d="M2.5 2.5l11 11" fill="none" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
     <button id="btn-help" class="icon-btn" aria-haspopup="dialog" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
     <button id="btn-har" class="icon-btn" title="Save the requests shown as a HAR file" aria-label="Save as HAR">
       <svg viewBox="0 0 16 16" width="16" height="16"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -131,6 +134,24 @@
         </dl>
       </section>
     </div>
+  </div>
+
+  <div id="hook-pop" role="dialog" aria-label="Page hook" hidden>
+    <div class="rules-head">
+      <strong>Page hook</strong>
+      <span class="note">A small script netmon runs inside pages, to record WebSocket messages and which script started each request.
+        Pages can tell it's there (nothing else netmon does is visible to them), so turn it off for sites that check for it. Where it's off,
+        WebSocket messages and “Started by script” aren't recorded; everything else is.</span>
+    </div>
+    <label class="radio"><input type="radio" name="hook-mode" value="except"> On everywhere except these sites</label>
+    <label class="radio"><input type="radio" name="hook-mode" value="only"> Only on these sites</label>
+    <textarea id="hook-sites" rows="5" spellcheck="false" placeholder="One site per line, e.g. example.com (includes its subdomains)"></textarea>
+    <div class="hook-here">
+      <span id="hook-here-text"></span>
+      <span class="spacer"></span>
+      <button id="hook-here-btn" class="text-btn"></button>
+    </div>
+    <div id="hook-reload" class="note" hidden>Changes apply when a page loads. <a href="#" id="hook-reload-link" class="link">Reload the tab</a></div>
   </div>
 
   <div id="rules-pop" role="dialog" aria-label="Filter rules" hidden>

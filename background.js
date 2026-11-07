@@ -29,7 +29,9 @@ function spec(...opts) {
 if (IS_CHROME) setInterval(() => browser.runtime.getPlatformInfo(), 20000);
 
 // preserveLog off: a new page load in a tab clears that tab's earlier requests (as in DevTools).
-const settings = { recording: true, captureBodies: true, preserveLog: true };
+// hookMode / hookSites: where page-hook.js runs, "except" the listed sites or
+// "only" on them (sites are host names; each covers its subdomains too).
+const settings = { recording: true, captureBodies: true, preserveLog: true, hookMode: "except", hookSites: [] };
 
 /* ---------------------------------------------------------------------------
  * State
@@ -675,30 +677,64 @@ const MAX_SOCKETS = 2000;
 
 const sockets = new Map(); // "tabId/frameId/pageId" -> { tabId, frameId, url, created, docUrl, entry, early }
 
-/* page-hook.js is declared in the manifest (world MAIN), so the browser puts
- * it in every page before the page's own scripts run, from the first page
- * after startup on. (It used to be registered from here at startup, which
- * pages loading during startup or right after an update could miss; such a
- * registration is removed.) */
-browser.scripting.getRegisteredContentScripts({ ids: [WS_SCRIPT_ID] })
-  .then((old) => old.length && browser.scripting.unregisterContentScripts({ ids: [WS_SCRIPT_ID] }))
-  .catch(() => {});
+/* The page hook (page-hook.js, in the page's world) and its relay (ws-relay.js)
+ * are registered here rather than in the manifest, so the "Page hook" setting
+ * can leave sites out: where they don't run, a page can't detect netmon.
+ * Registrations persist across browser restarts, so pages that load before
+ * this script runs still get them; they're only changed when the setting is.
+ * (The page timing script, which pages can't see, is in the manifest.) */
+const HOOK_ID = "netmon-page-hook", RELAY_ID = "netmon-ws-relay";
+const WEB = ["http://*/*", "https://*/*"];
+const sitePatterns = (sites) => sites.flatMap((h) => [`*://${h}/*`, `*://*.${h}/*`]);
+function hookAllowed(url) {
+  const host = (NM.safeUrl(url) || {}).hostname || "";
+  if (!/^https?:/.test(url || "")) return false;
+  const listed = settings.hookSites.some((h) => host === h || host.endsWith("." + h));
+  return settings.hookMode === "only" ? listed : !listed;
+}
+async function applyHookSetting() {
+  const listed = sitePatterns(settings.hookSites);
+  const where = settings.hookMode === "only"
+    ? (listed.length ? { matches: listed } : null)
+    : { matches: WEB, ...(listed.length ? { excludeMatches: listed } : {}) };
+  const common = { runAt: "document_start", allFrames: true, persistAcrossSessions: true, ...where };
+  const want = where ? [
+    { id: HOOK_ID, js: ["page-hook.js"], world: "MAIN", ...common },
+    { id: RELAY_ID, js: ["compat.js", "ws-relay.js"], ...common },
+  ] : [];
+  try {
+    const have = await browser.scripting.getRegisteredContentScripts({ ids: [HOOK_ID, RELAY_ID, WS_SCRIPT_ID] });
+    const key = (r) => JSON.stringify([r.id, r.js, (r.world || "ISOLATED").toUpperCase(), r.matches, r.excludeMatches || []]);
+    const same = have.length === want.length && want.every((w) => have.some((h) => key(h) === key(w)));
+    if (same) return;
+    if (have.length) await browser.scripting.unregisterContentScripts({ ids: have.map((h) => h.id) });
+    // Also in about:blank and similar frames of those pages, where the browser supports it.
+    if (want.length) {
+      try { await browser.scripting.registerContentScripts(want.map((w) => ({ ...w, matchOriginAsFallback: true }))); }
+      catch { await browser.scripting.registerContentScripts(want); }
+    }
+  } catch (err) {
+    console.error("Couldn't register the page hook:", err);
+  }
+}
 
 /* Tabs already open when the add-on is installed or updated don't get the
- * manifest's content scripts until they reload, so they're added now. Both
- * scripts skip themselves if a working copy is already there. */
+ * registered scripts until they reload, so they're added now, where the
+ * setting allows. Both skip themselves if a working copy is already there. */
 async function injectIntoOpenTabs() {
   let tabs = [];
-  try { tabs = await browser.tabs.query({ url: ["http://*/*", "https://*/*"] }); } catch { return; }
+  try { tabs = await browser.tabs.query({ url: WEB }); } catch { return; }
   for (const tab of tabs) {
     const target = { tabId: tab.id, allFrames: true };
+    browser.scripting.executeScript({ target: { tabId: tab.id }, files: ["compat.js", "page-timing.js"], injectImmediately: true }).catch(() => {});
+    if (!hookAllowed(tab.url)) continue;
     browser.scripting.executeScript({ target, files: ["page-hook.js"], world: "MAIN", injectImmediately: true })
       .then(() => browser.scripting.executeScript({ target, files: ["compat.js", "ws-relay.js"], injectImmediately: true }))
       .catch(() => { /* pages extensions can't touch (store, settings, ...) */ });
   }
 }
 browser.runtime.onInstalled.addListener((d) => {
-  if (d.reason === "install" || d.reason === "update") injectIntoOpenTabs();
+  if (d.reason === "install" || d.reason === "update") settingsLoaded.then(injectIntoOpenTabs);
 });
 
 // ws:// and the http:// form the handshake may be reported under are the same socket.
@@ -1586,17 +1622,32 @@ async function syncBlockRules() {
   }
 }
 
-browser.storage.local.get(["settings", "blocked"]).then(({ settings: saved, blocked }) => {
+const settingsLoaded = browser.storage.local.get(["settings", "blocked"]).then(({ settings: saved, blocked }) => {
   if (Array.isArray(blocked)) for (const u of blocked) blockedUrls.add(u);
   if (saved) {
     if (typeof saved.recording === "boolean") settings.recording = saved.recording;
     if (typeof saved.captureBodies === "boolean") settings.captureBodies = saved.captureBodies;
     if (typeof saved.preserveLog === "boolean") settings.preserveLog = saved.preserveLog;
+    if (saved.hookMode === "only" || saved.hookMode === "except") settings.hookMode = saved.hookMode;
+    if (Array.isArray(saved.hookSites)) settings.hookSites = cleanSites(saved.hookSites);
   }
   updateBadge();
   syncBlockRules();
   if (IS_CHROME) setDebugging(settings.captureBodies);
-});
+}, () => {}).then(applyHookSetting);
+
+// Host names as typed or pasted (URLs, *.example.com, upper case) -> plain hosts.
+function cleanSites(list) {
+  const out = new Set();
+  for (let x of list) {
+    x = String(x || "").trim().toLowerCase();
+    if (!x) continue;
+    const u = NM.safeUrl(/^[a-z]+:\/\//.test(x) ? x : "http://" + x.replace(/^\*\./, ""));
+    const host = u && u.hostname;
+    if (host && /^[a-z0-9.-]+$/.test(host)) out.add(host.replace(/^www\./, ""));
+  }
+  return [...out];
+}
 
 function clearAll() {
   for (const e of entries.values()) { e.removed = true; e.chunks = []; if (e.ws) e.ws.messages = []; if (e.stream) e.stream.messages = []; }
@@ -1735,6 +1786,11 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     case "setSettings":
       for (const k of ["recording", "captureBodies", "preserveLog"]) {
         if (typeof msg.settings[k] === "boolean") settings[k] = msg.settings[k];
+      }
+      if (msg.settings.hookMode === "only" || msg.settings.hookMode === "except" || Array.isArray(msg.settings.hookSites)) {
+        if (msg.settings.hookMode) settings.hookMode = msg.settings.hookMode;
+        if (Array.isArray(msg.settings.hookSites)) settings.hookSites = cleanSites(msg.settings.hookSites);
+        applyHookSetting();
       }
       if (IS_CHROME) setDebugging(settings.captureBodies);
       browser.storage.local.set({ settings: { ...settings } });

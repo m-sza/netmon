@@ -40,24 +40,10 @@
         "<all_urls>"
       ],
       "js": [
-        "page-hook.js"
-      ],
-      "run_at": "document_start",
-      "all_frames": true,
-      "world": "MAIN",
-      "match_about_blank": true
-    },
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
         "compat.js",
-        "ws-relay.js"
+        "page-timing.js"
       ],
-      "run_at": "document_start",
-      "all_frames": true,
-      "match_about_blank": true
+      "run_at": "document_start"
     }
   ],
   "browser_action": {

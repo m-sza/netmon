@@ -8,7 +8,7 @@ set -e
 cd "$(dirname "$0")"
 
 SHARED="compat.js common.js background.js panel.js overview.js actions.js syntax.js jsontree.js codetree.js format-worker.js beautifier.js filters.js preview.js fontinfo.js
-  page-hook.js ws-relay.js panel.html panel.css LICENSE-chromium-devtools.txt LICENSE-js-beautify.txt"
+  page-hook.js ws-relay.js page-timing.js panel.html panel.css LICENSE-chromium-devtools.txt LICENSE-js-beautify.txt"
 
 for f in $SHARED manifest.json manifest.chrome.json sw.js icons/icon.svg icons/icon-16.png icons/icon-32.png icons/icon-48.png icons/icon-128.png; do
   [ -f "$f" ] || { echo "Missing $f; not building." >&2; exit 1; }

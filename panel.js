@@ -931,8 +931,76 @@ function applySettings(st) {
   bodiesChk.checked = st.captureBodies;
   preserveChk.checked = st.preserveLog !== false;
   state.blocked = new Set(st.blocked || []);
+  state.hookMode = st.hookMode || "except";
+  state.hookSites = st.hookSites || [];
+  updateHookUi();
   scheduleRefresh();
 }
+
+/* Page hook setting (the button left of ?): where page-hook.js runs. Saved in
+ * the background, which registers the hook for those sites. */
+const hookBtn = $("btn-hook");
+const hookPop = $("hook-pop");
+const hookSitesBox = $("hook-sites");
+// The site of the inspected tab, as the setting lists sites (no www.).
+function inspectedSite() {
+  const id = inspectedTabId();
+  const t = id != null ? tabTitles.get(id) : null;
+  const u = t && safeUrl(t.url);
+  return u && /^https?:$/.test(u.protocol) ? u.hostname.replace(/^www\./, "") : null;
+}
+function hookOnFor(host) {
+  const listed = state.hookSites.some((h) => host === h || host.endsWith("." + h));
+  return state.hookMode === "only" ? listed : !listed;
+}
+function updateHookUi() {
+  if (!hookBtn) return;
+  const site = inspectedSite();
+  const on = site ? hookOnFor(site) : true;
+  hookBtn.classList.toggle("off", !on);
+  hookBtn.title = `Page hook: ${site ? `${on ? "on" : "off"} for ${site}` : state.hookMode === "only" ? "only on chosen sites" : "on"}. Click for the setting.`;
+  if (hookPop.hidden) return;
+  for (const r of hookPop.querySelectorAll('input[name="hook-mode"]')) r.checked = r.value === state.hookMode;
+  if (document.activeElement !== hookSitesBox) hookSitesBox.value = state.hookSites.join("\n");
+  $("hook-here-text").textContent = site ? `${site}: the hook is ${on ? "on" : "off"}` : "The inspected tab isn't a web page.";
+  const btn = $("hook-here-btn");
+  btn.hidden = !site;
+  btn.textContent = on ? "Turn off for this site" : "Turn on for this site";
+}
+function saveHook(mode, sites) {
+  browser.runtime.sendMessage({ cmd: "setSettings", settings: { hookMode: mode, hookSites: sites } })
+    .then((st) => { if (st) applySettings(st); }, () => {});
+  $("hook-reload").hidden = false;
+}
+function openHook() {
+  hookPop.hidden = false;
+  hookBtn.classList.add("active");
+  $("hook-reload").hidden = true;
+  const r = hookBtn.getBoundingClientRect();
+  hookPop.style.left = Math.max(8, Math.min(r.right - hookPop.offsetWidth, window.innerWidth - hookPop.offsetWidth - 8)) + "px";
+  hookPop.style.top = r.bottom + 4 + "px";
+  updateHookUi();
+}
+function closeHook() { hookPop.hidden = true; hookBtn.classList.remove("active"); }
+hookBtn.addEventListener("click", () => (hookPop.hidden ? openHook() : closeHook()));
+document.addEventListener("mousedown", (ev) => { if (!hookPop.hidden && !hookPop.contains(ev.target) && !hookBtn.contains(ev.target)) closeHook(); });
+hookPop.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); closeHook(); hookBtn.focus(); } });
+for (const r of hookPop.querySelectorAll('input[name="hook-mode"]')) r.addEventListener("change", () => saveHook(r.value, state.hookSites));
+hookSitesBox.addEventListener("change", () => saveHook(state.hookMode, hookSitesBox.value.split(/[\s,]+/)));
+$("hook-here-btn").addEventListener("click", () => {
+  const site = inspectedSite();
+  if (!site) return;
+  const on = hookOnFor(site);
+  // Off in "except" mode / on in "only" mode means listing the site; the other way, unlisting it (and any parent entry covering it).
+  const list = state.hookMode === "only" ? !on : on;
+  const sites = list ? [...state.hookSites, site] : state.hookSites.filter((h) => !(site === h || site.endsWith("." + h)));
+  saveHook(state.hookMode, sites);
+});
+$("hook-reload-link").addEventListener("click", (ev) => {
+  ev.preventDefault();
+  const id = inspectedTabId();
+  if (id != null) browser.tabs.reload(id).then(() => toast("Reloading the tab"), (err) => toast(`Couldn't reload the tab: ${err.message || err}`));
+});
 
 const port = browser.runtime.connect({ name: "panel" });
 port.onMessage.addListener((msg) => {
@@ -1478,6 +1546,7 @@ function tabItems() {
 }
 
 function updateTabButton() {
+  if (typeof updateHookUi === "function") setTimeout(updateHookUi, 0); // the hook button shows the inspected site's state
   const item = tabItems().find((it) => it.value === state.tabFilter);
   const label = tabSelect.querySelector(".select-label");
   label.textContent = item ? item.title : "Current tab";
@@ -3385,7 +3454,7 @@ function showWsMessage(v, m) {
 }
 
 function wsStatusText(ws) {
-  if (!ws) return "No frames recorded for this connection. It may have been opened before the extension loaded, or from a worker.";
+  if (!ws) return "No frames recorded for this connection. The page hook may be off for this site (the hook button in the toolbar), or it was opened before the page hook loaded, or from a worker.";
   const parts = [];
   if (ws.closed) {
     parts.push(`Closed${ws.closed.code ? ` with code ${ws.closed.code}` : ""}${ws.closed.reason ? ` (${ws.closed.reason})` : ""}${ws.closed.wasClean ? "" : ", not cleanly"}`);

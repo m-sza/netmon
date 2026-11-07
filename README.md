@@ -48,6 +48,16 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 | Esc | Close the details |
 | ? | All shortcuts (also the ? button) |
 
+## Page hook and detectability
+
+Almost everything netmon records comes from the browser's extension APIs, which pages can't see. One part runs inside pages: the **page hook**. It wraps `WebSocket` (Firefox gives extensions no other way to read WebSocket messages) and notes which script starts each request. A page can tell such wrapping is there: the wrapped functions show no name in `toString()`, calls are slightly slower, and a page that deliberately feeds them objects can see an extra stack frame (in Chrome it names the extension).
+
+The hook keeps everything else out of the page's reach: no added properties, constructors intact, random event names, the page's own objects never read, built-ins taken before the page can replace them, and errors cleaned of its stack lines.
+
+For sites that check, turn it off with the plug button in the toolbar: per site ("on everywhere except these sites"), or only on chosen sites. Where it's off, a page can't detect netmon at all; you lose that site's WebSocket messages in Firefox and the "Started by script" link.
+
+In Chrome, *Capture bodies* attaches the debugger, which shows a "started debugging" bar and slightly shrinks the page area.
+
 ## Build
 
 ```sh
