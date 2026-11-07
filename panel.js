@@ -2079,9 +2079,10 @@ function renderDetails(keepScroll) {
     detailsBody.append(note("This request is no longer available."));
     return;
   }
-  const isWs = current.type === "websocket";
-  $("details-tabs").querySelector('[data-tab="messages"]').hidden = !isWs;
-  if (state.detailsTab === "messages" && !isWs) {
+  // Messages: WebSocket frames, or a stream's messages (server-sent events, JSON lines, ...).
+  const hasMessages = current.type === "websocket" || !!current.stream;
+  $("details-tabs").querySelector('[data-tab="messages"]').hidden = !hasMessages;
+  if (state.detailsTab === "messages" && !hasMessages) {
     state.detailsTab = "headers";
     for (const b of document.querySelectorAll("#details-tabs button[data-tab]")) b.classList.toggle("active", b.dataset.tab === "headers");
   }
@@ -3241,8 +3242,9 @@ function createComposer(v) {
   };
 }
 
-function createWsView(id) {
-  const v = { id, next: 0, msgs: [], selected: null, scroll: 0, stick: true, fetching: false, again: false, canSend: false };
+// stream: a read-only list of a stream's messages (no sending, all received).
+function createWsView(id, stream) {
+  const v = { id, stream, next: 0, msgs: [], selected: null, scroll: 0, stick: true, fetching: false, again: false, canSend: false };
   const filterInput = h("input", { type: "search", class: "ws-filter", placeholder: "Filter messages", spellcheck: "false", title: "Text or /regex/" });
   const dirSelect = h("select", { class: "ws-dir" },
     h("option", { value: "all" }, "All"), h("option", { value: "send" }, "Sent"), h("option", { value: "recv" }, "Received"));
@@ -3255,9 +3257,9 @@ function createWsView(id) {
   v.newBtn = h("button", { class: "text-btn", onclick: () => v.composer.open(null) }, "New message");
   v.el = h("div", { class: "ws-view" },
     v.status,
-    h("div", { class: "actions" }, filterInput, dirSelect, v.count, h("span", { class: "spacer" }), v.newBtn),
+    h("div", { class: "actions" }, filterInput, stream ? null : dirSelect, v.count, h("span", { class: "spacer" }), stream ? null : v.newBtn),
     v.list,
-    v.composer.el,
+    stream ? null : v.composer.el,
     v.detail);
 
   v.list.addEventListener("scroll", () => {
@@ -3301,6 +3303,13 @@ function createWsView(id) {
     tr.click();
     const m = v.msgs[Number(tr.dataset.i)];
     const has = m.data != null;
+    if (v.stream) {
+      openMenu(ev.clientX, ev.clientY, [
+        { label: "Copy Message", disabled: !has, run: () => copy(m.data, "Message copied") },
+        { label: "Copy All Messages", run: () => copy(v.msgs.filter((x) => x.data != null).map((x) => x.data).join("\n"), "Messages copied") },
+      ], ev.target);
+      return;
+    }
     openMenu(ev.clientX, ev.clientY, [
       { label: m.op === 2 ? "Copy Message (base64)" : "Copy Message", disabled: !has, run: () => copy(m.data, "Message copied") },
       "-",
@@ -3325,7 +3334,9 @@ function updateCount(v) {
 
 function showWsMessage(v, m) {
   if (!m) { v.detail.replaceChildren(note("Select a message to see its full content.")); return; }
-  const head = note(`${m.resent ? "Sent from the monitor" : m.dir === "send" ? "Sent" : "Received"} at ${fmtClock(m.t)} · ${m.op === 2 ? "binary" : "text"} · ${fmtBytes(m.size)} · Right-click the message to resend it`);
+  const head = v.stream
+    ? note(["Received at " + fmtClock(m.t), m.event && `event “${m.event}”`, m.id && `id ${m.id}`, fmtBytes(m.size)].filter(Boolean).join(" · "))
+    : note(`${m.resent ? "Sent from the monitor" : m.dir === "send" ? "Sent" : "Received"} at ${fmtClock(m.t)} · ${m.op === 2 ? "binary" : "text"} · ${fmtBytes(m.size)} · Right-click the message to resend it`);
   if (m.data == null) {
     v.detail.replaceChildren(head, note("The content wasn't captured because “Capture bodies” was off."));
     return;
@@ -3333,7 +3344,9 @@ function showWsMessage(v, m) {
   const buf = m.op === 2 ? base64ToBuffer(m.data) : new TextEncoder().encode(m.data).buffer;
   const parts = [head];
   if (m.truncated) parts.push(note(`Only the first part of this message was captured.`));
-  parts.push(bodyView(buf, m.op === 2 ? "application/octet-stream" : "text/plain", "utf-8", ""));
+  // Stream messages are mostly JSON: shown as a tree when they parse.
+  const json = v.stream && /^\s*[[{]/.test(m.data) && (() => { try { JSON.parse(m.data); return true; } catch { return false; } })();
+  parts.push(bodyView(buf, m.op === 2 ? "application/octet-stream" : json ? "application/json" : "text/plain", "utf-8", ""));
   v.detail.replaceChildren(...parts);
 }
 
@@ -3365,7 +3378,8 @@ async function fetchWsMessages(v) {
         v.msgs.push(m);
         const tr = h("tr", { class: m.dir === "send" ? "ws-send" : "ws-recv", "data-i": i },
           h("td", { class: "ws-arrow", title: m.dir === "send" ? "Sent" : "Received" }, m.dir === "send" ? "↑" : "↓"),
-          h("td", { class: "ws-data" }, m.resent ? h("span", { class: "ws-tag", title: "Sent from the monitor" }, "resent") : null, wsPreview(m)),
+          h("td", { class: "ws-data" }, m.resent ? h("span", { class: "ws-tag", title: "Sent from the monitor" }, "resent") : null,
+            m.event ? h("span", { class: "ws-tag", title: "Event type" }, m.event) : null, wsPreview(m)),
           h("td", { class: "ws-size" }, fmtBytes(m.size)),
           h("td", { class: "ws-time" }, fmtClock(m.t)));
         tr.hidden = !v.match(m);
@@ -3381,9 +3395,23 @@ async function fetchWsMessages(v) {
   }
 }
 
+function streamStatusText(st) {
+  const what = { sse: "Server-sent events", lines: "JSON lines", chunks: "Streamed response, piece by piece" }[st.kind] || "Stream";
+  const parts = [what, st.done ? "ended" : "streaming…", `${st.count} ${st.count === 1 ? "message" : "messages"}`];
+  if (st.dropped) parts.push(`oldest ${st.dropped} dropped to save memory`);
+  if (st.error) parts.push(st.error);
+  return parts.join(" · ");
+}
+
 function renderMessages(d) {
-  if (!wsView || wsView.id !== d.id) wsView = createWsView(d.id);
+  if (!wsView || wsView.id !== d.id) wsView = createWsView(d.id, !!d.stream);
   const v = wsView;
+  if (d.stream) {
+    v.status.textContent = streamStatusText(d.stream);
+    requestAnimationFrame(() => { v.list.scrollTop = v.stick ? v.list.scrollHeight : v.scroll; });
+    fetchWsMessages(v);
+    return v.el;
+  }
   v.status.textContent = wsStatusText(d.ws);
   v.canSend = !!(d.ws && d.ws.canSend);
   updateSendState(v);

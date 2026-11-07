@@ -12,6 +12,7 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 - JavaScript, CSS and HTML bodies formatted (even when minified) into a collapsible code view, like the JSON tree; Raw shows them as sent. Formatting uses [js-beautify](https://github.com/beautifier/js-beautify) (MIT)
 - TLS / security details per request
 - WebSocket traffic, including sending and editing-and-resending messages; HAR export includes WebSocket frames
+- Streams in the Messages tab, live as they arrive: server-sent events (from `fetch` or `EventSource`), JSON lines, and JSON or text responses that arrive piece by piece (e.g. AI chat answers)
 - Resend / edit and resend requests
 - Copy as cURL, fetch, Python `requests` and Python `curl_cffi`
 - Search across URLs, headers and bodies of the inspected tab (Ctrl+Shift+F); it finds values URL-encoded, JSON- or HTML-escaped too, and opens each result at the match

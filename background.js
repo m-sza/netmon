@@ -100,10 +100,11 @@ function clearTab(tabId) {
 function dropEntry(e) {
   entries.delete(e.id);
   if (active.get(e.requestId) === e) active.delete(e.requestId);
-  totalBodyBytes -= e.storedBytes + (e.ws ? e.ws.bytes : 0);
+  totalBodyBytes -= e.storedBytes + (e.ws ? e.ws.bytes : 0) + (e.stream ? e.stream.bytes : 0);
   e.chunks = [];
   e.storedBytes = 0;
   if (e.ws) { e.ws.messages = []; e.ws.bytes = 0; }
+  if (e.stream) { e.stream.messages = []; e.stream.bytes = 0; }
   e.removed = true;
   dirty.delete(e.id);
   if (ports.size) { removedIds.push(e.id); scheduleFlush(); }
@@ -243,6 +244,112 @@ function finish(e, d, state) {
 }
 
 /* ---------------------------------------------------------------------------
+ * Streams: responses read bit by bit as they arrive, kept as messages with
+ * their arrival time, like WebSocket frames (the panel's Messages tab):
+ *   "sse"    server-sent events (text/event-stream), one message per event
+ *   "lines"  JSON lines (application/x-ndjson, jsonl, ...), one per line
+ *   "chunks" any JSON or plain-text response still arriving after a second
+ *            (streamed fetch responses), one per piece received
+ * ------------------------------------------------------------------------- */
+const MAX_STREAM_MESSAGES = 10000;              // per stream; oldest are dropped beyond this
+const MAX_STREAM_BYTES = 16 * 1024 * 1024;      // per stream
+function streamKind(mime) {
+  mime = (mime || "").toLowerCase();
+  if (/^text\/event-stream/.test(mime)) return "sse";
+  if (/ndjson|jsonl|jsonlines|json-seq|stream\+json|x-json-stream/.test(mime)) return "lines";
+  return null;
+}
+function startStream(e, kind) {
+  e.stream = { kind, messages: [], dropped: 0, bytes: 0, count: 0, buf: "", decoder: new TextDecoder(), event: null, done: false };
+  touch(e);
+}
+// Firefox: a response that turns out to be a stream. Declared ones start at
+// once; JSON or plain text still arriving a second after its first piece
+// becomes a "chunks" stream, with the pieces so far (the first 64 are noted
+// with their times until then).
+function watchForStream(e, data, now = Date.now()) {
+  const mime = e.mimeType || e.cdpMime || "";
+  const kind = streamKind(mime);
+  if (kind) { startStream(e, kind); streamData(e, data, now); return; }
+  if (e.chunkLog === null || !/json|text\/plain/i.test(mime)) return;
+  const log = e.chunkLog || (e.chunkLog = []);
+  if (log.length >= 64) { e.chunkLog = null; return; } // many pieces fast: a download, not a stream
+  log.push([now, data]);
+  if (log.length >= 3 && now - log[0][0] >= 1000) {
+    e.chunkLog = null;
+    startStream(e, "chunks");
+    for (const [t, d] of log) streamData(e, d, t);
+  }
+}
+function streamData(e, bytes, t) {
+  const st = e.stream;
+  if (!st || st.done) return;
+  const text = st.decoder.decode(bytes, { stream: true });
+  if (st.kind === "chunks") { if (text) pushStream(e, { t, data: text }); return; }
+  st.buf += text;
+  // Complete lines only; a trailing \r may be the first half of \r\n.
+  const cut = st.buf.endsWith("\r") ? st.buf.length - 1 : st.buf.length;
+  const lines = st.buf.slice(0, cut).split(/\r\n|\n|\r/);
+  st.buf = lines.pop() + st.buf.slice(cut);
+  for (const line of lines) streamLine(e, line, t);
+}
+function streamLine(e, line, t) {
+  const st = e.stream;
+  if (st.kind === "lines") { if (line.trim()) pushStream(e, { t, data: line }); return; }
+  // Server-sent events: fields until a blank line, which sends the event.
+  if (line === "") {
+    const ev = st.event;
+    st.event = null;
+    if (ev && ev.data.length) pushStream(e, { t, data: ev.data.join("\n"), event: ev.type || "", id: ev.id ?? "" });
+    return;
+  }
+  if (line[0] === ":") return; // a comment (keep-alive)
+  const i = line.indexOf(":");
+  const field = i < 0 ? line : line.slice(0, i);
+  const value = i < 0 ? "" : line.slice(i + 1).replace(/^ /, "");
+  const ev = st.event || (st.event = { data: [], type: "", id: null });
+  if (field === "data") ev.data.push(value);
+  else if (field === "event") ev.type = value;
+  else if (field === "id") ev.id = value;
+}
+function pushStream(e, m) {
+  const st = e.stream;
+  m.dir = "recv";
+  m.op = 1;
+  m.size = m.data.length;
+  if (!settings.captureBodies) m.data = null;
+  st.messages.push(m);
+  st.count++;
+  const len = m.data ? m.data.length : 0;
+  st.bytes += len;
+  totalBodyBytes += len;
+  while (st.messages.length > MAX_STREAM_MESSAGES || st.bytes > MAX_STREAM_BYTES) {
+    const old = st.messages.shift();
+    const n = old.data ? old.data.length : 0;
+    st.bytes -= n;
+    totalBodyBytes -= n;
+    st.dropped++;
+  }
+  touch(e);
+}
+// The response ended: what's left over counts too.
+function endStream(e) {
+  e.chunkLog = null;
+  const st = e.stream;
+  if (!st || st.done) return;
+  const rest = st.decoder.decode();
+  if (st.kind === "chunks") { if (rest) pushStream(e, { t: Date.now(), data: rest }); }
+  else {
+    st.buf += rest;
+    if (st.buf) streamLine(e, st.buf, Date.now());
+    st.buf = "";
+    if (st.kind === "sse") streamLine(e, "", Date.now()); // an event the stream ended without a blank line after
+  }
+  st.done = true;
+  touch(e);
+}
+
+/* ---------------------------------------------------------------------------
  * Response body capture (Firefox-only filterResponseData)
  * ------------------------------------------------------------------------- */
 function attachFilter(e) {
@@ -272,10 +379,13 @@ function attachFilter(e) {
     filter.write(data); // always pass the data through untouched
 
     if (e.removed) { filter.disconnect(); return; }
-    if (keep < data.byteLength) {
-      // Hit the per-body limit: stop intercepting, let the rest flow normally.
+    if (e.stream) streamData(e, data, Date.now());
+    else watchForStream(e, data);
+    if (keep < data.byteLength && e.bodyState === "capturing") {
+      // Hit the per-body limit: the body stops here. A stream's messages go
+      // on (they have their own limit); anything else flows on untouched.
       e.bodyState = "truncated";
-      filter.disconnect();
+      if (!e.stream) filter.disconnect();
       touch(e);
     }
     enforceBodyBudget();
@@ -283,6 +393,7 @@ function attachFilter(e) {
 
   filter.onstop = () => {
     try { filter.close(); } catch { /* already closed */ }
+    endStream(e);
     if (e.bodyState === "capturing") {
       e.bodyState = "done";
       e.bodySize = e.seenBytes;
@@ -291,6 +402,7 @@ function attachFilter(e) {
   };
 
   filter.onerror = () => {
+    endStream(e);
     if (e.bodyState === "capturing") {
       e.bodyState = e.storedBytes ? "partial" : "error";
       e.bodyError = filter.error;
@@ -746,10 +858,11 @@ async function wsSend(id, op, data) {
   }
 }
 
+// WebSocket frames, or a stream's messages (see streams).
 function wsMessages(id, from) {
   const e = entries.get(id);
-  if (!e || !e.ws) return null;
-  const ws = e.ws;
+  const ws = e && (e.ws || e.stream);
+  if (!ws) return null;
   const start = Math.max(0, (Number(from) || 0) - ws.dropped);
   return { base: ws.dropped + start, messages: ws.messages.slice(start) };
 }
@@ -953,7 +1066,48 @@ function onDebuggerEvent(source, method, params) {
       if (HTTP_VERSIONS[r.protocol]) { e.httpVersion = HTTP_VERSIONS[r.protocol]; e.httpVersionKnown = true; }
       if (/^(https|wss):/.test(e.url)) e.security = securityFromDebugger(r.securityState, r.securityDetails);
       if (r.remoteIPAddress && !e.ip) e.ip = r.remoteIPAddress;
+      // Streams: EventSource events come as events; other streams have to be
+      // asked for, piece by piece (Network.streamResourceContent).
+      // Possible "chunks" streams: JSON or plain text sent without a length
+      // (as streamed responses are); watchForStream decides from the timing.
+      const kind = params.type === "EventSource" ? "sse" : streamKind(r.mimeType);
+      const maybe = !kind && /json|text\/plain/i.test(r.mimeType || "") &&
+        !Object.keys(r.headers || {}).some((k) => k.toLowerCase() === "content-length");
+      if ((kind || maybe) && !e.stream && !e.cdpStream && settings.captureBodies) {
+        if (params.type === "EventSource") { startStream(e, "sse"); e.stream.fromEvents = true; }
+        else {
+          if (kind) startStream(e, kind);
+          e.cdpMime = r.mimeType;
+          const cs = e.cdpStream = { waiting: [], ended: false }; // pieces that arrive before the buffered start
+          const target = source.sessionId ? { tabId: source.tabId, sessionId: source.sessionId } : { tabId: source.tabId };
+          browser.debugger.sendCommand(target, "Network.streamResourceContent", { requestId: params.requestId }).then((res) => {
+            if (res && res.bufferedData) cdpStreamData(e, base64Bytes(res.bufferedData), Date.now());
+          }, (err) => {
+            if (e.stream) e.stream.error = `Chrome didn't stream this response (${err && err.message || err}); its body shows once it ends.`;
+          }).finally(() => {
+            const waiting = cs.waiting;
+            cs.waiting = null;
+            for (const [t, d] of waiting) cdpStreamData(e, d, t);
+            if (cs.ended) endStream(e);
+            touch(e);
+          });
+        }
+      }
       touch(e);
+      break;
+    }
+    case "Network.dataReceived": {
+      const [, e] = boundRequest(source, params.requestId);
+      if (!e || !e.cdpStream || !params.data) break;
+      const bytes = base64Bytes(params.data);
+      if (e.cdpStream.waiting) e.cdpStream.waiting.push([Date.now(), bytes]);
+      else cdpStreamData(e, bytes, Date.now());
+      break;
+    }
+    case "Network.eventSourceMessageReceived": {
+      const [, e] = boundRequest(source, params.requestId);
+      if (!e || !e.stream || !e.stream.fromEvents) break;
+      pushStream(e, { t: Date.now(), data: String(params.data ?? ""), event: params.eventName === "message" ? "" : params.eventName || "", id: params.eventId || "" });
       break;
     }
     case "Network.loadingFinished": {
@@ -962,6 +1116,7 @@ function onDebuggerEvent(source, method, params) {
       dbg.info.delete(k);
       if (!e) break;
       if (params.encodedDataLength) e.responseSize = params.encodedDataLength;
+      if (e.cdpStream && e.cdpStream.waiting) e.cdpStream.ended = true; else endStream(e);
       if (e.bodyState !== "capturing" || e.removed) { touch(e); break; }
       const target = source.sessionId ? { tabId: source.tabId, sessionId: source.sessionId } : { tabId: source.tabId };
       browser.debugger.sendCommand(target, "Network.getResponseBody", { requestId: params.requestId }).then((res) => {
@@ -977,10 +1132,24 @@ function onDebuggerEvent(source, method, params) {
       const [k, e] = boundRequest(source, params.requestId);
       dbg.bound.delete(k);
       dbg.info.delete(k);
+      if (e) { if (e.cdpStream && e.cdpStream.waiting) e.cdpStream.ended = true; else endStream(e); }
       if (e && e.bodyState === "capturing") { e.bodyState = "none"; touch(e); }
       break;
     }
   }
+}
+
+// Chrome: a piece of a response being streamed (see Network.responseReceived).
+function cdpStreamData(e, bytes, t) {
+  if (e.stream) streamData(e, bytes, t);
+  else watchForStream(e, bytes, t);
+}
+
+function base64Bytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 function storeDebuggerBody(e, res) {
@@ -1084,6 +1253,7 @@ function details(id) {
     responseHeaders: e.responseHeaders,
     requestBody: e.requestBody,
     responseBody: e.chunks.length ? NM.concat(e.chunks) : null,
+    stream: e.stream && { kind: e.stream.kind, count: e.stream.count, dropped: e.stream.dropped, done: e.stream.done, stored: e.stream.messages.length, error: e.stream.error || null },
     storedBytes: e.storedBytes,
     charset: e.charset,
     bodyError: e.bodyError,
@@ -1153,6 +1323,7 @@ function searchEntries(ids, text, scope) {
     if (all && has(requestBodyText(e))) where.push("requestBody");
     if (e.chunks.length && has(responseText(e))) where.push("responseBody");
     if (e.ws && e.ws.messages.some((m) => m.op === 1 && (all || m.dir === "recv") && has(m.data))) where.push("messages");
+    else if (e.stream && e.stream.messages.some((m) => has(m.data))) where.push("messages");
     if (where.length) out.push([id, where]);
   }
   return out;
@@ -1418,7 +1589,7 @@ browser.storage.local.get(["settings", "blocked"]).then(({ settings: saved, bloc
 });
 
 function clearAll() {
-  for (const e of entries.values()) { e.removed = true; e.chunks = []; if (e.ws) e.ws.messages = []; }
+  for (const e of entries.values()) { e.removed = true; e.chunks = []; if (e.ws) e.ws.messages = []; if (e.stream) e.stream.messages = []; }
   entries.clear();
   active.clear();
   dirty.clear();
