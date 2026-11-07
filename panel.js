@@ -1473,7 +1473,7 @@ function tabItems() {
   const items = [];
   const origin = state.originTabId;
   const ot = origin != null ? tabTitles.get(origin) : null;
-  items.push({ value: "current", title: origin != null ? `Current tab: ${tabTitleOf(ot, origin)}` : "Current tab",
+  items.push({ value: "current", title: origin != null ? `[current] ${tabTitleOf(ot, origin)}` : "[current]",
     closed: false, count: origin != null ? counts.get(origin) || 0 : null, tab: ot || null, icon: origin != null });
   items.push({ value: "all", title: "All tabs", count: store.size });
 
@@ -1549,7 +1549,7 @@ function updateTabButton() {
   if (typeof updateHookUi === "function") setTimeout(updateHookUi, 0); // the hook button shows the inspected site's state
   const item = tabItems().find((it) => it.value === state.tabFilter);
   const label = tabSelect.querySelector(".select-label");
-  label.textContent = item ? item.title : "Current tab";
+  label.textContent = item ? item.title : "[current]";
   const oldIcon = tabSelect.querySelector(".tab-icon");
   if (oldIcon) oldIcon.remove();
   if (item && item.icon) tabSelect.prepend(tabIcon(item.tab));

@@ -34,7 +34,9 @@
     </button>
     <span class="sep"></span>
     <button id="btn-rules" class="text-btn" aria-haspopup="dialog">Rules</button>
-    <button id="btn-search" class="text-btn" title="Search URLs, headers and bodies of the requests shown (Ctrl+Shift+F)">Search</button>
+    <button id="btn-search" class="icon-btn" title="Search URLs, headers and bodies of the requests shown (Ctrl+Shift+F)" aria-label="Search">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" fill="none" stroke-width="1.5"/><path d="M10.2 10.2 13.5 13.5" fill="none" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </button>
     <span class="sep"></span>
     <div id="view-mode" class="seg" title="List: requests in order. Tree: each request under the one that caused it.">
       <button data-mode="list" class="active">List</button>
@@ -57,7 +59,7 @@
       <button data-type="other">Other</button>
     </div>
     <span class="spacer"></span>
-    <button id="tab-filter" class="select-btn" aria-haspopup="listbox" aria-expanded="false" title="Show requests from one tab"><span class="select-label">Current tab</span></button>
+    <button id="tab-filter" class="select-btn" aria-haspopup="listbox" aria-expanded="false" title="Show requests from one tab"><span class="select-label">[current]</span></button>
     <label class="check" title="Keep requests when a page reloads or navigates. Off: a new page load in a tab clears that tab's earlier requests, as in DevTools.">
       <input type="checkbox" id="opt-preserve"> Preserve log
     </label>
