@@ -20,7 +20,7 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 - Cookies tab: which earlier response set each cookie (with a link to its `Set-Cookie`), whether a response replaced a value, and which cookies came from scripts
 - Trace a value: right-click a header, cookie, parameter or JSON value (or press T) → *Find where this came from* shows the earlier response that handed it out, e.g. the login response a token came from
 - GraphQL: the operation name in the list (mutations highlighted), each operation's query formatted and collapsible with its variables, GraphQL errors shown even on a 200 response, persisted queries recognised; `operation:` and `is:graphql` filters
-- DevTools-compatible filter language (`-mime-type:`, `transferred-larger-than:`, `is:blocked`, `size-larger-than:` …) in a rules editor (Ctrl+F)
+- DevTools-compatible filter language (`-mime-type:`, `transferred-larger-than:`, `is:blocked`, `size-larger-than:` …) in a rules editor (/)
 - Shows which extension blocked a request (e.g. "Blocked by uBlock Origin")
 - Initiator tree view (which script/stylesheet loaded what)
 - Offline preview of HTML (using already-recorded resources), images, SVGs and fonts
@@ -42,7 +42,7 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 | Ctrl+Shift+↑ ↓ / Home / End (←/→ for JSON) | Highlight a row in the details (collapse / expand); it stays on that row as you move between requests |
 | Ctrl+C, C, K, P / Shift+P | Copy the highlighted row, its value, its key, its JSON path (JavaScript / Python) |
 | Ctrl+R / F5 (Shift for a hard reload) | Reload the inspected tab |
-| Ctrl+F or / | Filter rules |
+| / | Filter rules |
 | Ctrl+Shift+F | Search URLs, headers and bodies (Enter / Shift+Enter: next / previous result) |
 | T | Where did the highlighted value come from? |
 | Esc | Close the details |

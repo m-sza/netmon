@@ -1080,7 +1080,7 @@ function compileFilters() {
   const on = filterRules.filter((r) => r.enabled).length;
   rulesBtn.textContent = filterRules.length ? `Rules (${on}${on !== filterRules.length ? "/" + filterRules.length : ""})` : "Rules";
   rulesBtn.classList.toggle("active", on > 0);
-  rulesBtn.title = (on ? filterRules.filter((r) => r.enabled).map((r) => r.text).join("\n") + "\n\n" : "") + "Filter rules (Ctrl+F)";
+  rulesBtn.title = (on ? filterRules.filter((r) => r.enabled).map((r) => r.text).join("\n") + "\n\n" : "") + "Filter rules (/)";
   applyFilters();
 }
 
@@ -1173,10 +1173,10 @@ document.addEventListener("keydown", (ev) => {
   }
 }, true);
 
-// Ctrl+F (Cmd+F) or / opens the filter rules, like focusing the filter in DevTools.
+// / opens the filter rules (or puts the cursor back in their box).
 document.addEventListener("keydown", (ev) => {
   const slash = ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.target.matches("input, textarea, select, [contenteditable]") && !document.querySelector("dialog[open]");
-  if (slash || ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === "f" || ev.key === "F"))) {
+  if (slash) {
     ev.preventDefault();
     if (rulesPop.hidden) openRules(); else ruleAdd.focus();
   }
