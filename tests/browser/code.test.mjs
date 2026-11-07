@@ -60,14 +60,14 @@ for (const kind of BROWSERS) describe(`code view (${kind})`, () => {
     assert.ok(l.includes("@media (max-width:600px) {"));
   });
 
-  it("HTML: V switches the page preview and its code", async () => {
+  it("HTML: H switches the page preview and its code", async () => {
     await t.select("/code/", "response");
     assert.equal(await t.ev(() => state.htmlView), "preview");
-    await t.press("v");
+    await t.press("h");
     await t.waitFor(() => document.querySelector(".codetree"));
     const l = await lines();
     assert.ok(l.includes("<html>") && l.includes("<body>") && l.includes("var z = {"));
-    await t.press("v");
+    await t.press("h");
     assert.equal(await t.ev(() => state.htmlView), "preview");
   });
 

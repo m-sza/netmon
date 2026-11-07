@@ -1898,6 +1898,15 @@ document.addEventListener("keydown", (ev) => {
     else closeDetails();
     return;
   }
+  // V / Shift+V: the next / previous view (List, Tree, Endpoints).
+  if (!ev.ctrlKey && !ev.altKey && !ev.metaKey && (ev.key === "v" || ev.key === "V" || ev.code === "KeyV")) {
+    ev.preventDefault();
+    const modes = ["list", "tree", "endpoints"];
+    const next = modes[(modes.indexOf(state.viewMode) + (ev.shiftKey ? 2 : 1)) % 3];
+    setViewMode(next);
+    toast({ list: "List view", tree: "Tree view", endpoints: "Endpoints view" }[next]);
+    return;
+  }
   const cursor = state.cursorId != null && viewPos.has(state.cursorId) ? state.cursorId : state.selectedId;
   const open = state.selectedId != null;
   // Enter / Space open the row the keyboard is on, and close it again, like
@@ -1939,7 +1948,7 @@ document.addEventListener("keydown", (ev) => {
       const what = plain && (letter === "c" && !ev.shiftKey ? "value" : letter === "k" && !ev.shiftKey ? "key" : letter === "p" ? (ev.shiftKey ? "pypath" : "path") : null);
       if (what) { ev.preventDefault(); copyFromDetailsCursor(what); return; }
     }
-    if (plain && !ev.shiftKey && letter === "v") {
+    if (plain && !ev.shiftKey && letter === "h") {
       ev.preventDefault();
       const seg = [...detailsBody.querySelectorAll(".fmt-seg")].find((x) => viewCtl.has(x));
       if (seg) viewCtl.get(seg)();
@@ -2754,7 +2763,7 @@ function bodyView(buf, mime, charset, url, ctx) {
     h("button", { class: "text-btn", onclick: () => viewer()?.expandAll() }, "Expand all"),
     h("button", { class: "text-btn", onclick: () => viewer()?.collapseAll() }, "Collapse all"));
   // HTML: the page (preview) or its code. The V key switches.
-  const htmlSeg = preview && codeLang && h("span", { class: "seg fmt-seg", title: "Show the page, or its formatted, collapsible code. Key: V" },
+  const htmlSeg = preview && codeLang && h("span", { class: "seg fmt-seg", title: "Show the page, or its formatted, collapsible code. Key: H" },
     ...[["preview", "Preview"], ["code", "Code"]].map(([v, label]) =>
       h("button", { "data-view": v, onclick: () => { state.htmlView = v; show(); } }, label)));
   if (htmlSeg) viewCtl.set(htmlSeg, () => {

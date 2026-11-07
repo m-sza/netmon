@@ -38,7 +38,8 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 | Shift+↑ ↓, Shift+Page Up/Down | Scroll the details |
 | R | Raw on / off (headers, JSON, HTML) |
 | M | Raw JSON pretty-printed / minified (starts as sent) |
-| V | HTML: page preview / formatted code |
+| H | HTML: page preview / formatted code |
+| V / Shift+V | Next / previous view: List, Tree, Endpoints |
 | F, N / Shift+N | Find in the body, next / previous match |
 | Ctrl+Shift+↑ ↓ / Home / End (←/→ for JSON) | Highlight a row in the details (collapse / expand); it stays on that row as you move between requests |
 | Ctrl+C, C, K, P / Shift+P | Copy the highlighted row, its value, its key, its JSON path (JavaScript / Python) |
