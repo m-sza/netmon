@@ -5,11 +5,13 @@ import { BROWSERS, useBrowser } from "../helpers/browser.mjs";
 
 for (const kind of BROWSERS) describe(`endpoints view (${kind})`, () => {
   const t = useBrowser(kind);
+  // The rows, indented by depth: folders as "name/", endpoints as "METHOD label [calls]", calls as their path.
   const rows = () => t.ev(() => { if (viewDirty) rebuildView(); refreshView(); return view.map((id) => {
     const r = rowOf(id);
-    return r.ep ? `${r.method} ${r.pattern} [${r.calls.length}]` : `  ${new URL(r.url).pathname}`;
+    const pad = "  ".repeat(treeInfo.get(id).depth);
+    return pad + (r.folder ? (r.name === r.host ? "<host>" : r.name) + "/" : r.ep ? `${r.method} ${r.label} [${r.calls.length}]` : new URL(r.url).pathname);
   }); });
-  const epRow = (pattern) => t.ev((p) => [...epRows.values()].find((e) => e.pattern === p).id, pattern);
+  const epRow = (pattern) => t.ev((p) => [...epRows.values()].find((e) => !e.folder && e.pattern === p).id, pattern);
   before(async () => {
     await t.openSite("/ep/");
     await t.openPanel();
@@ -17,25 +19,40 @@ for (const kind of BROWSERS) describe(`endpoints view (${kind})`, () => {
     await t.ev(() => { ruleAdd.value = "/ep/api/"; compileFilters(); setViewMode("endpoints"); });
   });
 
-  it("groups calls by method and path pattern", async () => {
+  it("groups calls by method and path pattern, in folders by host and path", async () => {
     assert.deepEqual(await rows(), [
-      "GET /ep/api/users/{id} [3]",
-      "GET /ep/api/users/{uuid} [1]",
-      "GET /ep/api/search [2]",
-      "POST /ep/api/posts [2]",
+      "<host>/",
+      "  /ep/api/", // a folder holding just one folder is shown as one
+      "    /users/",
+      "      GET /{id} [3]",
+      "      GET /{uuid} [1]",
+      "    GET /search [2]",
+      "    POST /posts [2]",
     ]);
+  });
+
+  it("folders fold; a folder lists its endpoints", async () => {
+    const users = await t.ev(() => [...epRows.values()].find((e) => e.folder && e.name === "/users").id);
+    await t.ev((i) => { document.activeElement.blur(); moveCursor(i); }, users);
+    await t.press("ArrowLeft");
+    assert.ok(!(await rows()).some((r) => r.includes("{id}")));
+    await t.press("ArrowRight");
+    await t.ev((i) => select(i), users);
+    await t.waitFor(() => document.querySelectorAll("#details-body table.kv a.link").length === 2);
+    assert.deepEqual(await t.ev(() => [...document.querySelectorAll("#details-body table.kv a.link")].map((a) => a.textContent)), ["GET /{id}", "GET /{uuid}"]);
+    await t.press("Escape");
   });
 
   it("→ expands an endpoint to its calls, ← on a call goes back to the endpoint", async () => {
     const id = await epRow("/ep/api/users/{id}");
     await t.ev((i) => { document.activeElement.blur(); moveCursor(i); }, id);
     await t.press("ArrowRight");
-    assert.deepEqual((await rows()).slice(0, 4), ["GET /ep/api/users/{id} [3]", "  /ep/api/users/42", "  /ep/api/users/43", "  /ep/api/users/7"]);
+    assert.deepEqual((await rows()).slice(3, 7), ["      GET /{id} [3]", "        /ep/api/users/42", "        /ep/api/users/43", "        /ep/api/users/7"]);
     await t.press("ArrowDown");
     await t.press("ArrowLeft");
     assert.equal(await t.ev(() => state.cursorId), id);
     await t.press("ArrowLeft");
-    assert.equal((await rows()).length, 4);
+    assert.equal((await rows()).length, 7);
   });
 
   it("an endpoint's details: path and query parameters, response shape", async () => {

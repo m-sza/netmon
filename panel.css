@@ -621,7 +621,7 @@ pre.code, .jtree {
 .ic-font { color: var(--ic-font); }
 .ic-json { color: var(--ic-json); }
 .ic-media { color: var(--ic-media); }
-.ic-fetch, .ic-ws, .ic-wasm, .ic-manifest, .ic-ping, .ic-text, .ic-other { color: var(--ic-default); }
+.ic-fetch, .ic-ws, .ic-wasm, .ic-manifest, .ic-ping, .ic-text, .ic-other, .ic-folder { color: var(--ic-default); }
 #rows tr.selected .ficon { color: var(--sel-text); }
 
 /* ---------------- Syntax highlighting ---------------- */

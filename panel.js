@@ -159,7 +159,7 @@ function iconKind(s) {
   return "other";
 }
 
-const ICON_TITLES = { doc: "Document", js: "Script", css: "Stylesheet", img: "Image", font: "Font", media: "Media", ws: "WebSocket", ping: "Beacon / ping", json: "JSON", fetch: "Fetch / XHR", wasm: "WebAssembly", manifest: "Manifest", text: "Text", other: "Other" };
+const ICON_TITLES = { folder: "Folder", doc: "Document", js: "Script", css: "Stylesheet", img: "Image", font: "Font", media: "Media", ws: "WebSocket", ping: "Beacon / ping", json: "JSON", fetch: "Fetch / XHR", wasm: "WebAssembly", manifest: "Manifest", text: "Text", other: "Other" };
 
 function makeIcon() {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -710,7 +710,8 @@ function setViewMode(mode) {
 // The requests shown (for HAR export); in the Endpoints view, every call of the endpoints shown.
 function visibleIds() {
   if (state.viewMode !== "endpoints") return view.slice();
-  return view.filter((id) => id < 0).flatMap((id) => epRows.get(id).calls).sort((a, b) => a - b);
+  if (viewDirty) rebuildView();
+  return [...epRows.values()].filter((e) => !e.folder).flatMap((e) => e.calls).sort((a, b) => a - b);
 }
 
 let refreshQueued = false;
@@ -836,7 +837,7 @@ function refreshView() {
 
   $("st-count").textContent = (visible === store.size
     ? `${store.size} request${store.size === 1 ? "" : "s"}`
-    : `${visible} / ${store.size} requests`) + (state.viewMode === "endpoints" ? ` · ${epRows.size} endpoint${epRows.size === 1 ? "" : "s"}` : "");
+    : `${visible} / ${store.size} requests`) + (state.viewMode === "endpoints" ? ` · ${epCount()} endpoint${epCount() === 1 ? "" : "s"}` : "");
   $("st-transferred").textContent = `${fmtBytes(transferred)} transferred`;
   $("st-size").textContent = `${fmtBytes(size)} resources`;
   $("st-finish").textContent = visible ? `Span: ${fmtMs(t1 - t0)}` : "";
@@ -1787,7 +1788,7 @@ function goToRow(id) {
 function levelJump(id, dir) {
   if (state.viewMode === "endpoints") {
     const node = treeInfo && treeInfo.get(id);
-    if (dir < 0) return node && node.anc[0] < 0 ? node.anc[0] : null;
+    if (dir < 0) return node && node.anc.length ? node.anc[node.anc.length - 1] : null;
     for (let i = viewPos.get(id) + 1; i < view.length; i++) if (view[i] < 0) return view[i];
     return null;
   }
@@ -1998,9 +1999,9 @@ document.addEventListener("keydown", (ev) => {
     if (node && node.kids && (cursor < 0 ? epCollapsed(cursor) : collapsed.has(cursor)) === (ev.key === "ArrowRight")) {
       ev.preventDefault();
       toggleCollapsed(cursor, false);
-    } else if (ev.key === "ArrowLeft" && state.viewMode === "endpoints" && node && node.anc[0] < 0) {
+    } else if (ev.key === "ArrowLeft" && state.viewMode === "endpoints" && node && node.anc.length) {
       ev.preventDefault();
-      goToRow(node.anc[0]); // from a call to its endpoint
+      goToRow(node.anc[node.anc.length - 1]); // to the endpoint or folder it's in
     }
     return;
   }

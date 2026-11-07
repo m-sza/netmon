@@ -2,8 +2,10 @@
 
 /* The Endpoints view (List | Tree | Endpoints): requests grouped by method,
  * host and path pattern (NM.pathPattern: /users/123 -> /users/{id}); GraphQL
- * by operation. Each endpoint is a row of the request list with a negative
- * id; it expands to its requests, which are ordinary rows. Opening an
+ * by operation. Endpoints sit in a tree of folders: the host, then the path
+ * (a folder holding just one folder is merged with it: /api/organizations/{uuid}).
+ * Folders and endpoints are rows of the request list with negative ids;
+ * folders start open, endpoints expand to their requests, which are ordinary rows. Opening an
  * endpoint row shows what its calls have in common instead of the request
  * tabs: path and query parameters, request body fields, the response shape
  * and the headers that change. Uses panel.js's list, details pane and helpers. */
@@ -11,6 +13,7 @@
 const epByKey = new Map(); // key -> endpoint row (rebuilt with the view; ids stay)
 const epRows = new Map(); // negative id -> endpoint row
 const epOpen = new Set(); // keys of expanded endpoints
+const folderClosed = new Set(); // keys of collapsed folders
 let epNextId = -1;
 const epIds = new Map(); // key -> id, kept so selection and cursor survive rebuilds
 
@@ -23,7 +26,8 @@ function endpointKey(s) {
   return `${s.method} ${scheme}${u.host}${NM.pathPattern(u.pathname)}${ops}`;
 }
 
-const isEndpoint = (id) => id < 0 && epRows.has(id);
+const epCount = () => [...epRows.values()].filter((e) => !e.folder).length;
+const isEndpoint = (id) => id < 0 && epRows.has(id); // an endpoint or a folder
 // A row of the list: a request summary, or an endpoint.
 const rowOf = (id) => (id < 0 ? epRows.get(id) : store.get(id));
 
@@ -70,19 +74,86 @@ function flattenEndpoints() {
     ep.avgTime = ep.timed ? ep.time / ep.timed : null;
     ep.rev = `${ep.calls.length}:${hashText(ep.rev)}`;
   }
+  return flattenFolders([...epRows.values()]);
+}
+
+// The id a folder or endpoint keeps across rebuilds.
+function rowId(key) {
+  let id = epIds.get(key);
+  if (id == null) { id = epNextId--; epIds.set(key, id); }
+  return id;
+}
+
+/* Puts the endpoints in folders (host, then path parts) and returns the rows
+ * to show, filling treeInfo (depth, children, ancestors) for the arrows and
+ * guide lines. Folders get totals like endpoints. */
+function flattenFolders(eps) {
+  const newFolder = (key, name, host) => ({ key, name, host, folders: new Map(), eps: [] });
+  const hosts = new Map();
+  for (const ep of eps) {
+    const scheme = /^wss?:/.test(ep.url) ? ep.url.slice(0, ep.url.indexOf(":")) + "://" : "";
+    const hostKey = "folder " + scheme + ep.host;
+    let node = hosts.get(hostKey) || (hosts.set(hostKey, newFolder(hostKey, scheme + ep.host, ep.host)), hosts.get(hostKey));
+    const parts = ep.pattern.split("/").filter(Boolean);
+    for (const part of parts.slice(0, -1)) {
+      const key = node.key + "/" + part;
+      node = node.folders.get(key) || (node.folders.set(key, newFolder(key, "/" + part, ep.host)), node.folders.get(key));
+    }
+    // The endpoint's own part of the path (a trailing slash kept: /basic/).
+    ep.label = parts.length ? "/" + parts[parts.length - 1] + (ep.pattern.endsWith("/") ? "/" : "") : "/";
+    node.eps.push(ep);
+  }
+  // A folder with just one folder in it and no endpoints is shown as one: /api/organizations/{uuid}.
+  const compact = (f, isHost) => {
+    for (const child of f.folders.values()) compact(child, false);
+    if (isHost) return;
+    while (f.folders.size === 1 && !f.eps.length) {
+      const only = [...f.folders.values()][0];
+      f.name += only.name;
+      f.key = only.key;
+      f.folders = only.folders;
+      f.eps = only.eps;
+    }
+  };
+  // Totals of a folder: everything below it.
+  const total = (f) => {
+    const below = [...f.eps, ...[...f.folders.values()].map(total)];
+    const row = {
+      id: rowId(f.key), ep: true, folder: true, key: f.key, name: f.name, host: f.host, pattern: f.name, method: "",
+      calls: below.flatMap((x) => x.calls), endpoints: below.reduce((n, x) => n + (x.folder ? x.endpoints : 1), 0),
+      statuses: new Map(), start: Math.min(...below.map((x) => x.start)), end: Math.max(...below.map((x) => x.end)),
+      transferred: below.reduce((n, x) => n + x.transferred, 0), state: below.some((x) => x.state === "pending") ? "pending" : below.some((x) => x.state === "error") ? "error" : "done",
+      kids: below, url: "", type: "", mimeType: "",
+    };
+    for (const x of below) for (const [c, n] of x.statuses) row.statuses.set(c, (row.statuses.get(c) || 0) + n);
+    row.status = [...row.statuses.keys()].filter((c) => typeof c === "number").sort((a, b) => b - a)[0] ?? null;
+    const sized = below.reduce((n, x) => n + (x.folder ? x.sized : x.sized), 0);
+    const timed = below.reduce((n, x) => n + x.timed, 0);
+    row.size = below.reduce((n, x) => n + x.size, 0);
+    row.sized = sized;
+    row.time = below.reduce((n, x) => n + x.time, 0);
+    row.timed = timed;
+    row.avgSize = sized ? row.size / sized : null;
+    row.avgTime = timed ? row.time / timed : null;
+    row.rev = `${row.calls.length}:${hashText(below.map((x) => x.rev).join(","))}`;
+    epRows.set(row.id, row);
+    return row;
+  };
+  const roots = [...hosts.values()].map((hst) => { compact(hst, true); return total(hst); });
+
   treeInfo = new Map();
   const out = [];
-  const eps = [...epRows.values()];
-  const ordered = state.sortKey ? sortEndpoints(eps) : eps.sort((a, b) => a.start - b.start);
-  for (const ep of ordered) {
-    treeInfo.set(ep.id, { depth: 0, kids: ep.calls.length, context: false, anc: [] });
-    out.push(ep.id);
-    if (!epOpen.has(ep.key)) continue;
-    for (const id of sortIds(ep.calls)) {
-      treeInfo.set(id, { depth: 1, kids: 0, context: false, anc: [ep.id] });
-      out.push(id);
-    }
-  }
+  const order = (rows) => (state.sortKey ? sortEndpoints(rows) : rows.slice().sort((a, b) => a.start - b.start));
+  const emit = (row, depth, anc) => {
+    const open = row.folder ? !folderClosed.has(row.key) : epOpen.has(row.key);
+    treeInfo.set(row.id, { depth, kids: row.folder ? row.kids.length : row.calls.length, context: false, anc });
+    out.push(row.id);
+    if (!open) return;
+    const kidAnc = [...anc, row.id];
+    if (row.folder) for (const kid of order(row.kids)) emit(kid, depth + 1, kidAnc);
+    else for (const id of sortIds(row.calls)) { treeInfo.set(id, { depth: depth + 1, kids: 0, context: false, anc: kidAnc }); out.push(id); }
+  };
+  for (const r of order(roots)) emit(r, 0, []);
   return out;
 }
 
@@ -98,10 +169,15 @@ function sortEndpoints(eps) {
   return eps.map((e) => [key(e), e]).sort(([va, a], [vb, b]) => (va < vb ? -dir : va > vb ? dir : a.start - b.start)).map(([, e]) => e);
 }
 
-function epCollapsed(id) { return !epOpen.has(epRows.get(id).key); }
+// Folders start open, endpoints closed.
+function epCollapsed(id) {
+  const row = epRows.get(id);
+  return row.folder ? folderClosed.has(row.key) : !epOpen.has(row.key);
+}
 function toggleEndpoint(id) {
-  const key = epRows.get(id).key;
-  if (epOpen.has(key)) epOpen.delete(key); else epOpen.add(key);
+  const row = epRows.get(id);
+  const set = row.folder ? folderClosed : epOpen;
+  if (set.has(row.key)) set.delete(row.key); else set.add(row.key);
   viewDirty = true;
   scheduleRefresh();
 }
@@ -116,13 +192,15 @@ function fillEndpointRow(tr, ep) {
   cMethod.textContent = ep.method;
   cDomain.textContent = ep.host;
   cDomain.title = ep.host;
-  cFile.querySelector(".fname").textContent = ep.pattern;
+  cFile.querySelector(".fname").textContent = ep.folder ? ep.name : ep.label || ep.pattern;
+  tr.classList.toggle("ep-folder", !!ep.folder);
   const op = cFile.querySelector(".gql-op");
   op.textContent = ep.gql ? (ep.gql.length > 1 ? `${ep.gql.length} operations` : ep.gql[0].name || `(${ep.gql[0].type})`) : "";
   op.className = "gql-op" + (ep.gql && ep.gql.some((o) => o.type === "mutation") ? " mutation" : "");
-  cFile.title = `${ep.method} ${ep.url}${op.textContent ? " · " + op.textContent : ""}\n${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}`;
+  cFile.title = ep.folder ? `${ep.name}\n${ep.endpoints} endpoint${ep.endpoints === 1 ? "" : "s"}, ${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}`
+    : `${ep.method} ${ep.url}${op.textContent ? " · " + op.textContent : ""}\n${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}`;
   const first = store.get(ep.calls[0]);
-  const kind = iconKind(first);
+  const kind = ep.folder ? "folder" : iconKind(first);
   if (cFile.dataset.icon !== kind) {
     cFile.dataset.icon = kind;
     const svg = cFile.querySelector("svg");
@@ -130,9 +208,9 @@ function fillEndpointRow(tr, ep) {
     svg.firstChild.textContent = ICON_TITLES[kind];
     svg.lastChild.setAttribute("href", "#i-" + kind);
   }
-  cInit.textContent = `${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}`;
+  cInit.textContent = ep.folder ? `${ep.endpoints} endpoint${ep.endpoints === 1 ? "" : "s"} · ${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}` : `${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}`;
   cInit.title = "";
-  cType.textContent = mimeShort(effectiveMime(first).mime) || causeLabel(first.type);
+  cType.textContent = ep.folder ? "" : mimeShort(effectiveMime(first).mime) || causeLabel(first.type);
   cType.title = "";
   cTrans.textContent = ep.transferred ? fmtBytes(ep.transferred) : "";
   cTrans.title = "Transferred, all calls";
@@ -144,10 +222,37 @@ function fillEndpointRow(tr, ep) {
   tr.classList.toggle("row-error", ep.state === "error" || (ep.status ?? 0) >= 400); // some call failed
 }
 
+/* Details of a folder: the endpoints in it, each a link that opens it. */
+function renderFolder(f) {
+  ++epToken;
+  detailsPane.classList.add("endpoint-details");
+  revokeBlobs();
+  const eps = [];
+  const walk = (row, path) => { for (const k of row.kids) { if (k.folder) walk(k, path + k.name); else eps.push([path + k.label, k]); } };
+  walk(f, "");
+  const counts = [...f.statuses].sort(([a], [b]) => String(a).localeCompare(String(b))).map(([c, k]) => `${c === "error" ? "failed" : c} ×${k}`).join(" · ");
+  detailsBody.replaceChildren(
+    h("div", { class: "ep-title mono" }, f.host === f.name ? f.name : f.host + " " + f.name),
+    kvTable([["Endpoints", String(f.endpoints)], ["Calls", String(f.calls.length)], ["Statuses", counts]]),
+    section("Endpoints", eps.length, kvTable(eps.map(([path, ep]) => [
+      h("a", { href: "#", class: "link mono", onclick: (e) => { e.preventDefault(); revealEndpoint(ep.id); } }, `${ep.method} ${path || "/"}`),
+      `${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}${ep.gql ? " · " + ep.gql.map((o) => o.name || `(${o.type})`).join(", ") : ""}`,
+    ]))));
+  detailsBody.scrollTop = 0;
+}
+// Opens an endpoint, opening the folders above it.
+function revealEndpoint(id) {
+  const node = treeInfo && treeInfo.get(id);
+  for (const a of node ? node.anc : []) folderClosed.delete(epRows.get(a).key);
+  viewDirty = true;
+  select(id);
+}
+
 /* Details of an endpoint: what its calls have in common. Most of it comes
  * from the background (it has the bodies); path parameters from the URLs. */
 let epToken = 0;
 async function renderEndpoint(ep) {
+  if (ep.folder) { renderFolder(ep); return; }
   const token = ++epToken;
   detailsPane.classList.add("endpoint-details");
   revokeBlobs();
