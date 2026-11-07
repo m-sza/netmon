@@ -200,8 +200,8 @@ function fillEndpointRow(tr, ep) {
   cFile.title = ep.folder ? `${ep.name}\n${ep.endpoints} endpoint${ep.endpoints === 1 ? "" : "s"}, ${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}`
     : `${ep.method} ${ep.url}${op.textContent ? " · " + op.textContent : ""}\n${ep.calls.length} call${ep.calls.length === 1 ? "" : "s"}`;
   const first = store.get(ep.calls[0]);
-  const kind = ep.folder ? "folder" : iconKind(first);
-  if (cFile.dataset.icon !== kind) {
+  const kind = iconKind(first);
+  if (!ep.folder && cFile.dataset.icon !== kind) {
     cFile.dataset.icon = kind;
     const svg = cFile.querySelector("svg");
     svg.setAttribute("class", "ficon ic-" + kind);

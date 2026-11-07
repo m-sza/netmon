@@ -621,7 +621,7 @@ pre.code, .jtree {
 .ic-font { color: var(--ic-font); }
 .ic-json { color: var(--ic-json); }
 .ic-media { color: var(--ic-media); }
-.ic-fetch, .ic-ws, .ic-wasm, .ic-manifest, .ic-ping, .ic-text, .ic-other, .ic-folder { color: var(--ic-default); }
+.ic-fetch, .ic-ws, .ic-wasm, .ic-manifest, .ic-ping, .ic-text, .ic-other { color: var(--ic-default); }
 #rows tr.selected .ficon { color: var(--sel-text); }
 
 /* ---------------- Syntax highlighting ---------------- */
@@ -913,6 +913,7 @@ table.kv td .note.cookie-origin:empty { display: none; }
 
 /* Endpoints view */
 #details-pane.endpoint-details #details-tabs button[data-tab] { display: none; }
+#rows tr.ep-folder svg.ficon { display: none; } /* folders: just their name */
 .ep-title { font-size: 13px; font-weight: 600; margin: 6px 0 4px; word-break: break-all; }
 .ep-title .gql-op { color: var(--tok-fn); font-weight: normal; }
 .ep-method { color: var(--accent); }

@@ -159,7 +159,7 @@ function iconKind(s) {
   return "other";
 }
 
-const ICON_TITLES = { folder: "Folder", doc: "Document", js: "Script", css: "Stylesheet", img: "Image", font: "Font", media: "Media", ws: "WebSocket", ping: "Beacon / ping", json: "JSON", fetch: "Fetch / XHR", wasm: "WebAssembly", manifest: "Manifest", text: "Text", other: "Other" };
+const ICON_TITLES = { doc: "Document", js: "Script", css: "Stylesheet", img: "Image", font: "Font", media: "Media", ws: "WebSocket", ping: "Beacon / ping", json: "JSON", fetch: "Fetch / XHR", wasm: "WebAssembly", manifest: "Manifest", text: "Text", other: "Other" };
 
 function makeIcon() {
   const svg = document.createElementNS(SVG_NS, "svg");
