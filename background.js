@@ -1157,6 +1157,44 @@ function searchEntries(ids, text, scope) {
   }
   return out;
 }
+/* Where a request's cookies came from: for each cookie it sent, the latest
+ * earlier response on the same site that set that cookie (and whether to the
+ * same value); for each cookie its response sets, the earlier response that
+ * set it before. Cookies set by scripts (document.cookie) have no response. */
+function cookieOrigins(id) {
+  const e = entries.get(id);
+  if (!e) return null;
+  const site = siteOf(e.url);
+  const earlier = [];
+  for (const x of entries.values()) if (x !== e && x.start <= e.start && siteOf(x.url) === site) earlier.push(x);
+  earlier.reverse(); // newest first
+  const parsed = new Map();
+  const setBy = (x) => {
+    if (!parsed.has(x)) parsed.set(x, NM.parseSetCookies(NM.headerAll(x.responseHeaders, "set-cookie")));
+    return parsed.get(x);
+  };
+  const lastSet = (name, value) => {
+    for (const x of earlier) {
+      const c = setBy(x).filter((c) => c.name === name).pop();
+      if (c) return { id: x.id, same: c.value === value };
+    }
+    return null;
+  };
+  return {
+    sent: NM.parseCookieHeader(NM.header(e.requestHeaders, "cookie")).map((c) => lastSet(c.name, c.value)),
+    set: NM.parseSetCookies(NM.headerAll(e.responseHeaders, "set-cookie")).map((c) => lastSet(c.name, c.value)),
+  };
+}
+// The site a URL belongs to, for cookies: its last two host labels (three for
+// hosts like example.co.uk). Close enough to the browser's cookie scoping here.
+function siteOf(url) {
+  const host = (NM.safeUrl(url) || {}).hostname || "";
+  if (/^[\d.]+$|^\[|^localhost$/.test(host)) return host;
+  const labels = host.split(".");
+  const n = /^(co|com|net|org|gov|ac|edu|ne|or|go)$/.test(labels[labels.length - 2] || "") && labels[labels.length - 1].length === 2 ? 3 : 2;
+  return labels.slice(-n).join(".");
+}
+
 function requestBodyText(e) {
   const rb = e.requestBody;
   if (!rb || rb.error) return "";
@@ -1522,6 +1560,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       updateBadge();
       broadcast({ type: "settings", settings: publicSettings() });
       return Promise.resolve(publicSettings());
+    case "cookieOrigins":
+      return Promise.resolve(cookieOrigins(msg.id));
     case "search":
       return Promise.resolve(searchEntries(msg.ids, msg.text, msg.scope));
     case "exportHar":

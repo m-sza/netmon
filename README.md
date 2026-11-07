@@ -15,6 +15,8 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 - Resend / edit and resend requests
 - Copy as cURL, fetch, Python `requests` and Python `curl_cffi`
 - Search across URLs, headers and bodies of the inspected tab (Ctrl+Shift+F); it finds values URL-encoded, JSON- or HTML-escaped too, and opens each result at the match
+- "Started by script" opens the script (or the page, for inline scripts) in the code view at the exact call that made the request, even when the script was minified
+- Cookies tab: which earlier response set each cookie (with a link to its `Set-Cookie`), whether a response replaced a value, and which cookies came from scripts
 - Trace a value: right-click a header, cookie, parameter or JSON value (or press T) → *Find where this came from* shows the earlier response that handed it out, e.g. the login response a token came from
 - DevTools-compatible filter language (`-mime-type:`, `transferred-larger-than:`, `is:blocked`, `size-larger-than:` …) in a rules editor (Ctrl+F)
 - Shows which extension blocked a request (e.g. "Blocked by uBlock Origin")

@@ -2091,6 +2091,12 @@ function renderDetails(keepScroll) {
   const sticky = stickyRows.get(state.detailsTab);
   const again = sticky ? findStickyRow(sticky) : null;
   paintSearch(!keepScroll && !again);
+  if (afterRender && current && afterRender.id === current.id && afterRender.tab === state.detailsTab) {
+    const run = afterRender.run;
+    afterRender = null;
+    run();
+    return;
+  }
   if (again) {
     setDetailsCursor(again, cursorTop == null && !keepScroll);
     if (!keepScroll && cursorTop != null) detailsBody.scrollTop += again.getBoundingClientRect().top - detailsBody.getBoundingClientRect().top - cursorTop;
@@ -2161,6 +2167,46 @@ function causedBy(d) {
     `${how}${p.method} ${fileName(p.url)}`);
 }
 
+/* "Started by script": opens the recorded script (or page, for an inline
+ * script) at that line and column, in its formatted code view. */
+function parseLoc(loc) { // "url:line:col" (col optional), 1-based
+  const m = /^(.*?):(\d+)(?::(\d+))?$/.exec(loc || "");
+  return m && { url: m[1], line: Number(m[2]), col: m[3] ? Number(m[3]) : 1 };
+}
+const noHash = (u) => { const i = u.indexOf("#"); return i < 0 ? u : u.slice(0, i); };
+// The recorded response a location points into: that URL, loaded before the
+// request, in the same tab if possible; the latest such.
+function sourceRequestFor(d, url) {
+  const key = noHash(url);
+  let best = null, bestOtherTab = null;
+  for (const s of store.values()) {
+    if (s.id === d.id || s.start > d.start || noHash(s.url) !== key) continue;
+    if (s.tabId === d.tabId) { if (!best || s.start > best.start) best = s; }
+    else if (!bestOtherTab || s.start > bestOtherTab.start) bestOtherTab = s;
+  }
+  return best || bestOtherTab;
+}
+function scriptLink(d) {
+  const loc = parseLoc(d.initiatorLoc);
+  if (!loc) return mono(d.initiatorLoc);
+  return h("a", { href: "#", class: "link mono", title: "Show this place in the script's code",
+    onclick: (e) => { e.preventDefault(); openSourceLocation(d, loc); } }, d.initiatorLoc);
+}
+function openSourceLocation(d, loc) {
+  const src = sourceRequestFor(d, loc.url);
+  if (!src) { toast("That script isn't among the recorded requests (it loaded before recording started, or was cleared)"); return; }
+  afterRender = { id: src.id, tab: "response", run: () => revealSourceLocation(loc) };
+  state.detailsTab = "response";
+  if (state.selectedId === src.id) renderDetails(false); else select(src.id);
+}
+function revealSourceLocation(loc) {
+  const wrap = [...detailsBody.querySelectorAll(".body-view")].find((w) => bodyCtl.has(w));
+  if (!wrap) { toast("This script's body wasn't recorded"); return; }
+  bodyCtl.get(wrap).reveal(loc.line, loc.col);
+}
+// Runs once after the details of a request render on a given tab (to point at something in them).
+let afterRender = null;
+
 /* Headers tab */
 function renderHeaders(d) {
   const st = d.status != null ? statusInfo(d) : null;
@@ -2176,7 +2222,7 @@ function renderHeaders(d) {
     d.httpVersion && ["Version", d.httpVersion],
     d.ip && ["Address", mono(d.ip)],
     ["Type", `${causeLabel(d.type)}${effectiveMime(d).mime ? " · " + mimeTitle(d) : ""}`],
-    d.initiatorLoc && ["Started by script", mono(d.initiatorLoc)],
+    d.initiatorLoc && ["Started by script", scriptLink(d), d.initiatorLoc],
     cause && ["Caused by", cause],
     d.originUrl && ["Initiator", mono(d.originUrl)],
     d.documentUrl && d.documentUrl !== d.originUrl && ["Document", mono(d.documentUrl)],
@@ -2219,22 +2265,72 @@ function headerSection(title, list, firstLine, pending) {
   return section(title, list.length, kvTable(list.map((x) => [x.name, x.value]), "header"));
 }
 
-/* Cookies tab */
+/* Cookies tab. Under each cookie: which earlier response set it (filled in
+ * when the background answers; see cookieOrigins there). */
 function renderCookies(d) {
   const reqCookies = parseCookieHeader(header(d.requestHeaders, "cookie"));
   const resCookies = parseSetCookies(headerAll(d.responseHeaders, "set-cookie"));
+  const origin = () => h("div", { class: "note cookie-origin" });
+  const resNotes = [], reqNotes = [];
   const out = [];
   out.push(section("Response cookies", resCookies.length,
     resCookies.length
       ? h("table", { class: "kv data" }, h("tbody", null, resCookies.map((c) => {
-          const tr = h("tr", null, h("td", { class: "k" }, c.name), h("td", null, c.value, c.attrs.length ? h("div", { class: "note" }, c.attrs.join("; ")) : null));
+          const o = origin();
+          resNotes.push(o);
+          const tr = h("tr", null, h("td", { class: "k" }, c.name), h("td", null, c.value, c.attrs.length ? h("div", { class: "note cookie-attrs" }, c.attrs.join("; ")) : null, o));
           kvRows.set(tr, { kind: "cookie", name: c.name, value: c.value, setCookie: c.attrs.length ? [`${c.name}=${c.value}`, ...c.attrs].join("; ") : null });
           return tr;
         })))
       : note("No cookies set by this response.")));
   out.push(section("Request cookies", reqCookies.length,
-    reqCookies.length ? kvTable(reqCookies.map((c) => [c.name, c.value]), "cookie") : note("No cookies sent with this request.")));
+    reqCookies.length
+      ? h("table", { class: "kv data" }, h("tbody", null, reqCookies.map((c) => {
+          const o = origin();
+          reqNotes.push(o);
+          const tr = h("tr", null, h("td", { class: "k" }, c.name), h("td", null, c.value, o));
+          kvRows.set(tr, { kind: "cookie", name: c.name, value: c.value });
+          return tr;
+        })))
+      : note("No cookies sent with this request.")));
+  if (resCookies.length || reqCookies.length) {
+    browser.runtime.sendMessage({ cmd: "cookieOrigins", id: d.id }).then((res) => {
+      if (!res || !current || current.id !== d.id) return;
+      res.sent.forEach((by, i) => {
+        const name = reqCookies[i].name;
+        if (!reqNotes[i]) return;
+        reqNotes[i].replaceChildren(...(!by
+          ? ["Set by a script, or before recording started (no recorded response set it)"]
+          : by.same ? ["Set by ", setCookieLink(by.id, name)]
+          : [setCookieLink(by.id, name), " set another value; this one came from a script"]));
+      });
+      res.set.forEach((prev, i) => {
+        const name = resCookies[i].name;
+        if (!resNotes[i]) return;
+        resNotes[i].replaceChildren(...(!prev ? ["New: no earlier response set it"]
+          : prev.same ? ["Same value as set by ", setCookieLink(prev.id, name)]
+          : ["Replaces the value set by ", setCookieLink(prev.id, name)]));
+      });
+    }, () => {});
+  }
   return out;
+}
+// A link to the response that set a cookie: opens it on Headers with its Set-Cookie highlighted.
+function setCookieLink(id, name) {
+  const s = store.get(id);
+  return h("a", { href: "#", class: "link", title: s ? s.url : "",
+    onclick: (e) => {
+      e.preventDefault();
+      afterRender = { id, tab: "headers", run: () => {
+        const tr = [...detailsBody.querySelectorAll("table.kv tr")].find((r) => {
+          const k = kvRows.get(r);
+          return k && k.kind === "header" && k.name.toLowerCase() === "set-cookie" && k.value.startsWith(name + "=");
+        });
+        if (tr) setDetailsCursor(tr, true);
+      } };
+      state.detailsTab = "headers";
+      if (state.selectedId === id) renderDetails(false); else select(id);
+    } }, s ? `${s.method} ${fileName(s.url)}` : "an earlier response");
 }
 
 /* Request tab */
@@ -2492,8 +2588,32 @@ function bodyView(buf, mime, charset, url, ctx) {
       codeBox.replaceChildren(...(res.error ? [note(`Couldn't format it (${res.error}), so it's shown as sent.`, "warn")] : []), code.el);
       show();
       if (view() === "code") paintSearch(true);
+      for (const f of codeReady.splice(0)) f();
     });
   };
+  const codeReady = []; // waiting for the code view
+  // Points at line:col (1-based, in the text as sent): in the code view (the
+  // place found again in the formatted text), or in the raw text.
+  bodyCtl.set(wrap, {
+    reveal(line, col) {
+      const at = offsetAt(text, line, col);
+      if (at == null) { toast(`Line ${line} is past the end of this body`); return; }
+      if (codeLang && view() !== "raw") {
+        if (view() === "preview") { state.htmlView = "code"; show(); }
+        const go = () => {
+          const f = mapOffset(text, code.text, at);
+          const ln = code.revealLine(f.line);
+          if (!ln) return;
+          setDetailsCursor(ln, false);
+          markSourceToken(ln, code.lineText(f.line), f.col - code.lineCut(f.line));
+        };
+        if (code) go(); else { codeReady.push(go); ensureCode(); }
+        return;
+      }
+      if (at >= TEXT_LIMIT) { toast("That place is past the part of the body shown"); return; }
+      markSourceToken(pre, text.slice(0, Math.min(text.length, TEXT_LIMIT)), at);
+    },
+  });
   // What shows: "raw" (the text as sent), "tree" (JSON), "code" or "preview" (HTML).
   const view = () => (state.rawBody ? "raw" : tree ? "tree" : preview && state.htmlView === "preview" ? "preview" : codeLang ? "code" : preview ? "preview" : "raw");
   const viewer = () => (view() === "tree" ? tree : code);
@@ -2574,6 +2694,65 @@ function bodyView(buf, mime, charset, url, ctx) {
 }
 
 const fmtCtl = new WeakMap(); // .fmt-seg element -> cycles the format
+const bodyCtl = new WeakMap(); // .body-view -> { reveal(line, col) }
+
+// The offset of a 1-based line and column in text, or null past the end.
+function offsetAt(text, line, col) {
+  let i = 0;
+  for (let n = 1; n < line; n++) {
+    i = text.indexOf("\n", i);
+    if (i < 0) return null;
+    i++;
+  }
+  const end = text.indexOf("\n", i);
+  return Math.min(i + Math.max(0, col - 1), end < 0 ? text.length : end);
+}
+// Where offset `at` of the original text is in its formatted version: the
+// formatter only changes whitespace, so the same number of other characters
+// comes before it. Returns a 0-based line and column of the formatted text.
+function mapOffset(orig, formatted, at) {
+  const isWs = (c) => c === 32 || c === 10 || c === 13 || c === 9;
+  let k = 0;
+  for (let i = 0; i < at; i++) if (!isWs(orig.charCodeAt(i))) k++;
+  let j = 0;
+  for (let seen = 0; j < formatted.length; j++) {
+    if (isWs(formatted.charCodeAt(j))) continue;
+    if (seen === k) break;
+    seen++;
+  }
+  const lineStart = formatted.lastIndexOf("\n", j - 1) + 1;
+  let line = 0;
+  for (let i = formatted.indexOf("\n"); i >= 0 && i < j; i = formatted.indexOf("\n", i + 1)) line++;
+  return { line, col: j - lineStart };
+}
+// Marks the token starting at character `at` of root's text (lineText is that
+// text) and scrolls to it.
+function markSourceToken(root, lineText, at) {
+  at = Math.max(0, at);
+  // A call's column can point at its "(" (Firefox does for some calls): mark the name before it.
+  if (lineText[at] === "(") { const name = /[\w$.]+$/.exec(lineText.slice(0, at)); if (name) at -= name[0].length; }
+  const m = /^(?:[\w$.]+|\S)/.exec(lineText.slice(at));
+  const len = m ? m[0].length : 1;
+  const r = rangeAt(root, at, at + len);
+  if (!r) return;
+  clearFindHighlights();
+  if (canHighlight) { const hl = new Highlight(r); hl.priority = 1; CSS.highlights.set("nm-find-current", hl); }
+  revealInDetails(r.getBoundingClientRect(), true);
+}
+// A Range over characters [start, end) of root's text (collapsed summaries left out).
+function rangeAt(root, start, end) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT,
+    { acceptNode: (n) => (n.parentElement.closest(".jt-summary") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+  const r = document.createRange();
+  let pos = 0, started = false;
+  for (let n; (n = walker.nextNode());) {
+    const len = n.data.length;
+    if (!started && start <= pos + len) { r.setStart(n, start - pos); started = true; }
+    if (started && end <= pos + len) { r.setEnd(n, end - pos); return r; }
+    pos += len;
+  }
+  return started ? r : null;
+}
 const viewCtl = new WeakMap(); // HTML Preview | Code switch -> flips it
 
 /* Formatting for the code view, in a worker (format-worker.js). Results are

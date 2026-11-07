@@ -246,7 +246,14 @@ const CodeTree = (() => {
     }
 
     const all = (open) => { for (const el of wrap.children) if (el.classList.contains("jt-node")) setOpen(el, open, true); };
-    return { el: wrap, isCode: true, text, entryAt, step, find, lineOf, expandAll: () => all(true), collapseAll: () => all(false) };
+    return {
+      el: wrap, isCode: true, text, entryAt, step, find, lineOf,
+      // Line i: shown (opening the blocks around it), its text as shown, and how much indentation was cut from it.
+      revealLine: (i) => (i >= 0 && i < raw.length ? lineOf({ line: i, chain: chainOf(i) }, true) : null),
+      lineText: (i) => plain[i] || "",
+      lineCut: (i) => (raw[i] || "").length - (plain[i] || "").length,
+      expandAll: () => all(true), collapseAll: () => all(false),
+    };
   }
 
   return { render };
