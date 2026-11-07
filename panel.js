@@ -2189,8 +2189,9 @@ function sourceRequestFor(d, url) {
 function scriptLink(d) {
   const loc = parseLoc(d.initiatorLoc);
   if (!loc) return mono(d.initiatorLoc);
-  return h("a", { href: "#", class: "link mono", title: "Show this place in the script's code",
-    onclick: (e) => { e.preventDefault(); openSourceLocation(d, loc); } }, d.initiatorLoc);
+  const short = `${fileName(loc.url)}:${loc.line}${/:\d+:\d+$/.test(d.initiatorLoc) ? ":" + loc.col : ""}`;
+  return h("a", { href: "#", class: "link mono", title: `${d.initiatorLoc}\nShow this place in the script's code`,
+    onclick: (e) => { e.preventDefault(); openSourceLocation(d, loc); } }, short);
 }
 function openSourceLocation(d, loc) {
   const src = sourceRequestFor(d, loc.url);
@@ -2224,8 +2225,10 @@ function renderHeaders(d) {
     ["Type", `${causeLabel(d.type)}${effectiveMime(d).mime ? " · " + mimeTitle(d) : ""}`],
     d.initiatorLoc && ["Started by script", scriptLink(d), d.initiatorLoc],
     cause && ["Caused by", cause],
-    d.originUrl && ["Initiator", mono(d.originUrl)],
-    d.documentUrl && d.documentUrl !== d.originUrl && ["Document", mono(d.documentUrl)],
+    // Only when they add something: the initiator if it isn't the cause or the
+    // page itself, the document if it's a frame's (the page is the Tab row).
+    d.originUrl && d.originUrl !== d.documentUrl && !(cause && store.get(treeParents().get(d.id))?.url === d.originUrl) && ["Initiator", mono(d.originUrl)],
+    d.documentUrl && d.frameId > 0 && ["Frame", mono(d.documentUrl)],
     ["Tab", tabLabel(d.tabId)],
     ["Started", fmtClock(d.start)],
     ["Duration", d.end ? fmtMs(d.end - d.start) : "Pending…"],
@@ -2296,20 +2299,20 @@ function renderCookies(d) {
   if (resCookies.length || reqCookies.length) {
     browser.runtime.sendMessage({ cmd: "cookieOrigins", id: d.id }).then((res) => {
       if (!res || !current || current.id !== d.id) return;
+      const say = (el, title, ...parts) => { el.title = title; el.replaceChildren(...parts); };
       res.sent.forEach((by, i) => {
         const name = reqCookies[i].name;
         if (!reqNotes[i]) return;
-        reqNotes[i].replaceChildren(...(!by
-          ? ["Set by a script, or before recording started (no recorded response set it)"]
-          : by.same ? ["Set by ", setCookieLink(by.id, name)]
-          : [setCookieLink(by.id, name), " set another value; this one came from a script"]));
+        if (!by) say(reqNotes[i], "No recorded response set this cookie: a script set it (document.cookie), or it was set before recording started.", "set by a script");
+        else if (by.same) say(reqNotes[i], "The latest earlier response that set this cookie", "from ", setCookieLink(by.id, name));
+        else say(reqNotes[i], "That response set another value; a script changed it to this one since.", "from ", setCookieLink(by.id, name), ", changed by a script");
       });
       res.set.forEach((prev, i) => {
         const name = resCookies[i].name;
         if (!resNotes[i]) return;
-        resNotes[i].replaceChildren(...(!prev ? ["New: no earlier response set it"]
-          : prev.same ? ["Same value as set by ", setCookieLink(prev.id, name)]
-          : ["Replaces the value set by ", setCookieLink(prev.id, name)]));
+        if (!prev) say(resNotes[i], "No earlier response on this site set this cookie.", "new");
+        else if (prev.same) say(resNotes[i], "An earlier response set the same value.", "same as ", setCookieLink(prev.id, name));
+        else say(resNotes[i], "This replaces the value an earlier response set.", "replaces ", setCookieLink(prev.id, name));
       });
     }, () => {});
   }
