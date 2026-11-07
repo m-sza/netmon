@@ -407,6 +407,11 @@ function inTimeRange(s, now = Date.now()) {
 function matches(s) {
   return matchesFilters(s) && inTimeRange(s) && (!search || !search.hits || search.hits.has(s.id));
 }
+// Shown greyed although the filters hide it, for orientation: while tracing,
+// the request the value was traced from.
+function contextRow(s) {
+  return !!(search && search.trace && s.id === search.trace.id && inTabScope(s));
+}
 
 // The overview redraws (throttled) when requests or filters change; not on scrolling.
 const overviewChanged = () => { if (typeof Overview !== "undefined") Overview.invalidate(); };
@@ -565,7 +570,7 @@ function rebuildView() {
     view = flattenTree();
   } else {
     const ids = [];
-    for (const [id, s] of store) if (matches(s)) ids.push(id);
+    for (const [id, s] of store) if (matches(s) || contextRow(s)) ids.push(id);
     view = sortIds(ids);
     treeInfo = null;
   }
@@ -620,7 +625,8 @@ function flattenTree() {
   const ids = [...store.keys()];
   for (let i = ids.length - 1; i >= 0; i--) { // children always arrive after their parents
     const id = ids[i];
-    if (matches(store.get(id))) { matched.add(id); keep.add(id); }
+    const s = store.get(id);
+    if (matches(s)) { matched.add(id); keep.add(id); } else if (contextRow(s)) keep.add(id);
     if (keep.has(id) && parent.has(id)) keep.add(parent.get(id));
   }
 
@@ -757,7 +763,7 @@ function renderRows(t0, span, now) {
     }
     setIfChanged(twisty, "textContent", node && node.kids ? (collapsed.has(id) ? "▸" : "▾") : "");
     setIfChanged(twisty, "title", node && node.kids ? `${node.kids} request${node.kids === 1 ? "" : "s"} started by this one. Alt+click for everything below.` : "");
-    tr.classList.toggle("context", !!(node && node.context));
+    tr.classList.toggle("context", node ? !!node.context : contextRow(s));
     // Waterfall bar
     const bar = tr.lastChild.firstChild;
     const end = s.end ?? now;
@@ -1787,13 +1793,13 @@ document.addEventListener("keydown", async (ev) => {
 }, true);
 
 document.addEventListener("keydown", (ev) => {
-  if (ev.target.matches("input, select, textarea") || document.querySelector("dialog[open]")) return;
-  // Escape: first drops the highlighted details row, then closes the details.
-  // Escape: drops the highlighted details row, then leaves tracing (back to
-  // the request traced from), then closes the details.
+  // Text boxes keep their keys; a focused checkbox (after a click on it) doesn't.
+  if (ev.target.matches("input:not([type=checkbox]):not([type=radio]), select, textarea") || document.querySelector("dialog[open]")) return;
+  // Escape: leaves tracing (back to the request traced from), else drops the
+  // highlighted details row, else closes the details.
   if (ev.key === "Escape") {
-    if (hasDetailsCursor()) setDetailsCursor(null);
-    else if (search && search.trace) closeSearch();
+    if (search && search.trace) closeSearch();
+    else if (hasDetailsCursor()) setDetailsCursor(null);
     else closeDetails();
     return;
   }
@@ -2701,7 +2707,11 @@ function createFinder(pre, tree, mode, toSource) {
   findCtl.set(el, {
     focus: () => { input.focus(); input.select(); }, next: () => go(1), prev: () => go(-1),
     // Search for `text` with the pattern `re` (from the request search). Returns whether it found any.
-    setQuery: (text, pattern, reveal) => { input.value = text; given = { text, re: pattern, reveal }; run(); return matches.length > 0; },
+    // The page preview is left as it is: a search never switches a body to Raw.
+    setQuery: (text, pattern, reveal) => {
+      if (mode() === "preview") return false;
+      input.value = text; given = { text, re: pattern, reveal }; run(); return matches.length > 0;
+    },
   });
   return { el, refresh: () => { if (input.value || re) run(); } };
 }
