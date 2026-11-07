@@ -1182,7 +1182,7 @@ document.addEventListener("keydown", (ev) => {
   }
 }, true);
 /* ---------------------------------------------------------------------------
- * Search (Ctrl+Shift+F, or the Search button): shows only the requests whose
+ * Search (Ctrl+F or Ctrl+Shift+F, or the Search button): shows only the requests whose
  * URL, headers or bodies contain a text, in the tab(s) the tab dropdown
  * picks. The background searches the bodies it keeps. Opening a result goes
  * to the details tab with the match, highlighted.
@@ -1375,7 +1375,8 @@ searchInput.addEventListener("keydown", (ev) => {
   }
 });
 document.addEventListener("keydown", (ev) => {
-  if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && !ev.altKey && (ev.key === "f" || ev.key === "F")) {
+  // Ctrl+F (Cmd+F), as in Chrome DevTools' Network panel; Ctrl+Shift+F as in Firefox's.
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === "f" || ev.key === "F")) {
     ev.preventDefault();
     openSearch();
   }
