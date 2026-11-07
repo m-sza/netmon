@@ -150,9 +150,10 @@
   </div>
 
   <div id="search-bar" hidden>
-    <span id="search-trace" hidden></span>
+    <span id="search-trace-pre" class="search-trace" hidden>Where did</span>
     <input id="search-input" type="text" spellcheck="false" placeholder="Search URLs, headers and bodies" aria-label="Search requests"
            title="Shows only the requests whose URL, headers or bodies contain this (also URL-encoded, JSON- or HTML-escaped). Case-insensitive. Enter / Shift+Enter: open the next / previous one. Esc: close.">
+    <span id="search-trace-post" class="search-trace" hidden></span>
     <span id="search-count"></span>
     <span class="spacer"></span>
     <button id="search-close" class="icon-btn" title="Close the search (Esc)" aria-label="Close the search">×</button>

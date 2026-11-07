@@ -1113,7 +1113,8 @@ document.addEventListener("keydown", (ev) => {
 const searchBar = $("search-bar");
 const searchInput = $("search-input");
 const searchCount = $("search-count");
-const searchTraceEl = $("search-trace");
+const searchTracePre = $("search-trace-pre");
+const searchTracePost = $("search-trace-post");
 const searchBtn = $("btn-search");
 // { text, re, trace: { id, start, label } | null, hits: Map id -> places (null until the first answer), scope }
 let search = null;
@@ -1198,13 +1199,15 @@ async function runSearch(ids) {
 }
 function updateSearchBar() {
   const sr = search;
-  searchTraceEl.hidden = !(sr && sr.trace);
+  searchTracePre.hidden = searchTracePost.hidden = !(sr && sr.trace);
+  // While tracing, the box is a word in the question: as wide as its text.
+  searchInput.style.width = sr && sr.trace ? `calc(${Math.max(8, Math.min(48, searchInput.value.length + 1))}ch + 16px)` : "";
   if (sr && sr.trace) {
     const cut = (t) => (t.length > 40 ? t.slice(0, 40) + "…" : t);
-    const what = sr.text === sr.trace.whole ? `“${cut(sr.text)}”` : `“${cut(sr.text)}” (part of “${cut(sr.trace.whole)}”)`;
-    searchTraceEl.replaceChildren(`Where did ${what} come from? Server responses before`,
-      h("a", { href: "#", class: "link", title: "Back to this request", onclick: (e) => { e.preventDefault(); closeSearch(); } }, sr.trace.label));
-    searchTraceEl.title = sr.text;
+    searchTracePost.replaceChildren(
+      sr.text !== sr.trace.whole ? h("span", { class: "note", title: sr.trace.whole }, `(part of “${cut(sr.trace.whole)}”) `) : "",
+      "come from? Server responses before",
+      h("a", { href: "#", class: "link", title: "Back to this request (Esc)", onclick: (e) => { e.preventDefault(); closeSearch(); } }, sr.trace.label));
   }
   searchCount.classList.remove("none");
   if (!sr) { searchCount.textContent = ""; return; }
@@ -1269,6 +1272,7 @@ searchBtn.addEventListener("click", () => (searchBar.hidden ? openSearch() : clo
 $("search-close").addEventListener("click", closeSearch);
 let searchInputTimer = null;
 searchInput.addEventListener("input", () => {
+  if (search && search.trace) updateSearchBar(); // keeps the box fitted to the text
   clearTimeout(searchInputTimer);
   searchInputTimer = setTimeout(() => {
     const text = searchInput.value;
@@ -1785,7 +1789,14 @@ document.addEventListener("keydown", async (ev) => {
 document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, select, textarea") || document.querySelector("dialog[open]")) return;
   // Escape: first drops the highlighted details row, then closes the details.
-  if (ev.key === "Escape") { if (hasDetailsCursor()) setDetailsCursor(null); else closeDetails(); return; }
+  // Escape: drops the highlighted details row, then leaves tracing (back to
+  // the request traced from), then closes the details.
+  if (ev.key === "Escape") {
+    if (hasDetailsCursor()) setDetailsCursor(null);
+    else if (search && search.trace) closeSearch();
+    else closeDetails();
+    return;
+  }
   const cursor = state.cursorId != null && viewPos.has(state.cursorId) ? state.cursorId : state.selectedId;
   const open = state.selectedId != null;
   // Enter / Space open the row the keyboard is on, and close it again, like
