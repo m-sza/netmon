@@ -38,9 +38,10 @@
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="7" cy="7" r="4.25" fill="none" stroke-width="1.5"/><path d="M10.2 10.2 13.5 13.5" fill="none" stroke-width="1.6" stroke-linecap="round"/></svg>
     </button>
     <span class="sep"></span>
-    <div id="view-mode" class="seg" title="List: requests in order. Tree: each request under the one that caused it.">
+    <div id="view-mode" class="seg" title="List: requests in order. Tree: each request under the one that caused it. Endpoints: requests grouped by API endpoint (/users/123 and /users/456 are /users/{id}).">
       <button data-mode="list" class="active">List</button>
       <button data-mode="tree">Tree</button>
+      <button data-mode="endpoints">Endpoints</button>
     </div>
     <button id="btn-overview" class="icon-btn" aria-pressed="false" title="Show the overview: every request on one timeline. Drag across it to show only that time range.">
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 4h5M5 7h6M9 10h5M3 13h4" fill="none" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -91,7 +92,7 @@
           <dt><kbd>Home</kbd> <kbd>End</kbd></dt><dd>First / last request</dd>
           <dt><kbd class="mod">Ctrl</kbd> <kbd>↑</kbd></dt><dd>The request that started this one</dd>
           <dt><kbd class="mod">Ctrl</kbd> <kbd>↓</kbd></dt><dd>Next request one level higher</dd>
-          <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Collapse / expand (Tree view)</dd>
+          <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Collapse / expand (Tree and Endpoints views)</dd>
           <dt><kbd>Enter</kbd> <kbd>Space</kbd></dt><dd>Open / close the request's details</dd>
           <dt><kbd>Esc</kbd></dt><dd>Close the details</dd>
         </dl>
@@ -250,6 +251,7 @@
   <script src="preview.js"></script>
   <script src="fontinfo.js"></script>
   <script src="panel.js"></script>
+  <script src="endpoints.js"></script>
   <script src="overview.js"></script>
   <script src="actions.js"></script>
 </body>

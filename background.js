@@ -1365,6 +1365,57 @@ function searchEntries(ids, text, scope) {
   }
   return out;
 }
+/* What an endpoint's calls have in common and where they differ, for the
+ * panel's Endpoints view: query parameters, request body fields and the
+ * response shape (JSON, merged over the calls; see NM.jsonShape), and the
+ * request headers whose value changes between calls. */
+function endpointInfo(ids) {
+  const list = (Array.isArray(ids) ? ids : []).map((id) => entries.get(id)).filter(Boolean);
+  const query = new Map(); // name -> { calls, examples }
+  const reqShape = new Map(), resShape = new Map();
+  let reqDocs = 0, resDocs = 0;
+  const headers = new Map(); // name -> Set of values
+  const example = (m, name, value) => {
+    const q = m.get(name) || (m.set(name, { calls: 0, examples: [] }), m.get(name));
+    q.calls++;
+    if (q.examples.length < 6 && !q.examples.includes(value)) q.examples.push(value);
+  };
+  const SAME = /^(content-length|accept|accept-language|accept-encoding|user-agent|connection|host|sec-.*|priority|pragma|cache-control|te|upgrade-insecure-requests|dnt)$/;
+  for (const e of list) {
+    const u = NM.safeUrl(e.url);
+    if (u) for (const name of new Set(u.searchParams.keys())) example(query, name, u.searchParams.getAll(name).join(", ").slice(0, 200));
+    const rb = e.requestBody;
+    if (rb && rb.formData) {
+      const doc = reqDocs++;
+      for (const [k, vs] of Object.entries(rb.formData)) NM.jsonShape(reqShape, vs.length > 1 ? vs : vs[0], doc, /^[A-Za-z_$][\w$]*$/.test(k) ? k : `[${JSON.stringify(k)}]`, 1);
+    } else {
+      const text = requestBodyText(e);
+      if (text && text.length < 5e6 && /^\s*[[{]/.test(text)) { try { NM.jsonShape(reqShape, JSON.parse(text), reqDocs++); } catch { /* not JSON */ } }
+    }
+    if (e.chunks.length && e.storedBytes < 5e6) {
+      const text = responseText(e);
+      if (/^\s*[[{]/.test(text)) { try { NM.jsonShape(resShape, JSON.parse(text), resDocs++); } catch { /* not JSON */ } }
+    }
+    for (const h of e.requestHeaders || []) {
+      const name = h.name.toLowerCase();
+      if (SAME.test(name)) continue;
+      const set = headers.get(name) || (headers.set(name, new Set()), headers.get(name));
+      if (set.size < 50) set.add(String(h.value).slice(0, 300));
+    }
+  }
+  const fields = (shape) => [...shape].filter(([path]) => path).slice(0, 1000).map(([path, f]) => ({
+    path, types: [...f.types], docs: f.docs, example: f.example === undefined ? undefined : String(f.example).slice(0, 120),
+  }));
+  return {
+    calls: list.length,
+    query: [...query].map(([name, q]) => ({ name, ...q })),
+    requestFields: fields(reqShape), requestDocs: reqDocs,
+    responseFields: fields(resShape), responseDocs: resDocs,
+    // Present in some calls only, or with different values: what a client has to get right.
+    headers: [...headers].filter(([, set]) => set.size > 1).map(([name, set]) => ({ name, values: set.size, examples: [...set].slice(0, 3) })),
+  };
+}
+
 /* Where a request's cookies came from: for each cookie it sent, the latest
  * earlier response on the same site that set that cookie (and whether to the
  * same value); for each cookie its response sets, the earlier response that
@@ -1788,6 +1839,8 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       updateBadge();
       broadcast({ type: "settings", settings: publicSettings() });
       return Promise.resolve(publicSettings());
+    case "endpointInfo":
+      return Promise.resolve(endpointInfo(msg.ids));
     case "cookieOrigins":
       return Promise.resolve(cookieOrigins(msg.id));
     case "search":

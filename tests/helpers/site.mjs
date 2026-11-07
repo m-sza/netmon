@@ -9,7 +9,8 @@
  *   /cookies/    cookies set by responses and by a script; a minified script
  *                whose calls make requests (for "Started by script")
  *   /code/       minified JavaScript, CSS and HTML
- *   /detect/     a page that checks what it can see of netmon */
+ *   /detect/     a page that checks what it can see of netmon
+ *   /ep/         an API called with different IDs, parameters and bodies (Endpoints view) */
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
@@ -56,6 +57,19 @@ const COOKIES_PAGE = '<!doctype html><html><head><script src="/cookies/app.js"><
 const CODE_JS = '!function(){"use strict";var e={a:1,b:[1,2,3]};function t(n){if(n>1){for(var r=0;r<n;r++){console.log(r)}return{x:n,y:"tok_secret"}}else{return null}}/* a comment\n spanning lines */window.app={init:function(){return t(3)},v:`tpl\n${e.a}`}}();';
 const CODE_CSS = "body{margin:0;color:red}.a .b{display:flex}@media (max-width:600px){.a{display:none}.c{color:blue}}";
 const CODE_HTML = '<!doctype html><html><head><title>T</title><link rel=stylesheet href=/code/s.css><style>p{color:red}</style></head><body><div class="w"><p>Hello <b>there</b></p><ul><li>a</li><li>b</li></ul><script src=/code/b.js></script><script>var z={q:1};</script></div></body></html>';
+
+const EP_PAGE = `<!doctype html><script>
+(async () => {
+  let n = 0;
+  const get = (u) => fetch(u, { headers: { "X-Request-Id": "req-" + ++n } });
+  for (const id of [42, 43, 7]) await get("/ep/api/users/" + id + "?fields=name&lang=en");
+  await get("/ep/api/users/0f8b6c1e-2a3d-4b5c-9d8e-7f6a5b4c3d2e");
+  await get("/ep/api/search?q=hello&page=1");
+  await get("/ep/api/search?q=world&page=2&sort=new");
+  for (const body of [{ title: "a", tags: ["x"] }, { title: "b", draft: true }]) {
+    await fetch("/ep/api/posts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+})();</script>`;
 
 // Checks a page can make for injected code; results in window.__results.
 const DETECT_CHECKS = String.raw`
@@ -158,6 +172,15 @@ function routes(base2) {
     if (p === "/code/") return send("text/html", CODE_HTML);
     if (p === "/code/b.js") return send("application/javascript", CODE_JS);
     if (p === "/code/s.css") return send("text/css", CODE_CSS);
+
+    // endpoints
+    if (p === "/ep/") return send("text/html", EP_PAGE);
+    if (p.startsWith("/ep/api/users/")) {
+      const id = p.split("/").pop();
+      return json(id === "7" ? { id, name: "Bo", admin: true } : { id: Number(id) || id, name: "Ada", address: { city: "Delft" } });
+    }
+    if (p === "/ep/api/search") return json({ q: u.searchParams.get("q"), results: [{ id: 1 }], next: u.searchParams.get("page") === "1" ? 2 : null });
+    if (p === "/ep/api/posts") return json({ ok: true, id: body.length });
 
     // detection
     if (p === "/detect/") return send("text/html", `<!doctype html><script>${DETECT_CHECKS}</script>`);

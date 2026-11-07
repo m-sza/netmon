@@ -443,6 +443,8 @@ function buildRow() {
 }
 
 function fillRow(tr, s) {
+  if (s.ep) { fillEndpointRow(tr, s); return; }
+  tr.classList.remove("endpoint");
   const [cStatus, cMethod, cDomain, cFile, cInit, cType, cTrans, cSize, cTime] = tr.children;
   const u = safeUrl(s.url);
 
@@ -574,7 +576,9 @@ const bottomPad = h("tr", { class: "pad" }, h("td"));
 
 function rebuildView() {
   viewDirty = false;
-  if (state.viewMode === "tree") {
+  if (state.viewMode === "endpoints") {
+    view = flattenEndpoints();
+  } else if (state.viewMode === "tree") {
     view = flattenTree();
   } else {
     const ids = [];
@@ -669,7 +673,7 @@ function setTreeGuideHover(id) {
   for (const tr of tbody.querySelectorAll("tr[data-id]")) tr.children[3].querySelector(".tguides")._key = null;
 }
 tbody.addEventListener("mouseover", (ev) => {
-  if (state.viewMode !== "tree") return;
+  if (state.viewMode === "list") return;
   const g = ev.target.closest(".tguide");
   if (g) { setTreeGuideHover(Number(g.dataset.anc)); return; }
   const tw = ev.target.closest(".twisty");
@@ -679,6 +683,7 @@ tbody.addEventListener("mouseover", (ev) => {
 tbody.addEventListener("mouseleave", () => setTreeGuideHover(null));
 
 function toggleCollapsed(id, deep) {
+  if (id < 0) { toggleEndpoint(id); return; } // an endpoint (Endpoints view)
   const close = !collapsed.has(id);
   const apply = (x) => (close ? collapsed.add(x) : collapsed.delete(x));
   apply(id);
@@ -696,14 +701,16 @@ function toggleCollapsed(id, deep) {
 function setViewMode(mode) {
   state.viewMode = mode;
   for (const b of document.querySelectorAll("#view-mode button")) b.classList.toggle("active", b.dataset.mode === mode);
-  document.body.classList.toggle("tree-mode", mode === "tree");
+  document.body.classList.toggle("tree-mode", mode === "tree" || mode === "endpoints");
   try { localStorage.setItem("viewMode", mode); } catch { /* ignore */ }
   stickPending = mode === "list" && !state.sortKey;
   applyFilters();
 }
 
+// The requests shown (for HAR export); in the Endpoints view, every call of the endpoints shown.
 function visibleIds() {
-  return view.slice();
+  if (state.viewMode !== "endpoints") return view.slice();
+  return view.filter((id) => id < 0).flatMap((id) => epRows.get(id).calls).sort((a, b) => a - b);
 }
 
 let refreshQueued = false;
@@ -737,7 +744,7 @@ function renderRows(t0, span, now) {
   const list = [];
   for (let i = first; i < last; i++) {
     const id = view[i];
-    const s = store.get(id);
+    const s = rowOf(id);
     let tr = rendered.get(id);
     if (!tr) {
       tr = spare.pop() || buildRow();
@@ -769,8 +776,8 @@ function renderRows(t0, span, now) {
         return g;
       }));
     }
-    setIfChanged(twisty, "textContent", node && node.kids ? (collapsed.has(id) ? "▸" : "▾") : "");
-    setIfChanged(twisty, "title", node && node.kids ? `${node.kids} request${node.kids === 1 ? "" : "s"} started by this one. Alt+click for everything below.` : "");
+    setIfChanged(twisty, "textContent", node && node.kids ? ((id < 0 ? epCollapsed(id) : collapsed.has(id)) ? "▸" : "▾") : "");
+    setIfChanged(twisty, "title", !(node && node.kids) ? "" : id < 0 ? `${node.kids} call${node.kids === 1 ? "" : "s"}: show or hide them` : `${node.kids} request${node.kids === 1 ? "" : "s"} started by this one. Alt+click for everything below.`);
     tr.classList.toggle("context", node ? !!node.context : contextRow(s));
     // Waterfall bar
     const bar = tr.lastChild.firstChild;
@@ -813,7 +820,8 @@ function refreshView() {
   let t1 = -Infinity;
   let transferred = 0;
   let size = 0;
-  for (const id of view) {
+  const ids = state.viewMode === "endpoints" ? visibleIds() : view;
+  for (const id of ids) {
     const s = store.get(id);
     if (s.start < t0) t0 = s.start;
     const end = s.end ?? now;
@@ -821,14 +829,14 @@ function refreshView() {
     if (!s.fromCache && s.transferred) transferred += s.transferred;
     if (s.size) size += s.size;
   }
-  const visible = view.length;
+  const visible = ids.length;
   // With a time range picked in the overview, the waterfall column shows that range.
   if (state.timeRange) { t0 = state.timeRange.from; t1 = state.timeRange.to; }
   renderRows(t0, Math.max(1, t1 - t0), now);
 
-  $("st-count").textContent = visible === store.size
+  $("st-count").textContent = (visible === store.size
     ? `${store.size} request${store.size === 1 ? "" : "s"}`
-    : `${visible} / ${store.size} requests`;
+    : `${visible} / ${store.size} requests`) + (state.viewMode === "endpoints" ? ` · ${epRows.size} endpoint${epRows.size === 1 ? "" : "s"}` : "");
   $("st-transferred").textContent = `${fmtBytes(transferred)} transferred`;
   $("st-size").textContent = `${fmtBytes(size)} resources`;
   $("st-finish").textContent = visible ? `Span: ${fmtMs(t1 - t0)}` : "";
@@ -895,7 +903,9 @@ function applyBatch(list, removed) {
     if (s.tabId >= 0 && !tabTitles.has(s.tabId)) tabsDirty = true;
     if (!viewDirty) {
       const shown = matches(s);
-      if (state.viewMode === "tree") {
+      if (state.viewMode === "endpoints") {
+        viewDirty = true; // totals and groups change
+      } else if (state.viewMode === "tree") {
         // Only changes that can move a request in the tree rebuild it.
         if (isNew || shown !== viewPos.has(s.id) || prev.initiator !== s.initiator ||
             prev.redirectedFrom !== s.redirectedFrom || prev.state !== s.state || prev.url !== s.url) viewDirty = true;
@@ -1405,7 +1415,7 @@ $("view-mode").addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-mode]");
   if (btn && btn.dataset.mode !== state.viewMode) setViewMode(btn.dataset.mode);
 });
-try { if (localStorage.getItem("viewMode") === "tree") setViewMode("tree"); } catch { /* storage unavailable */ }
+try { const m = localStorage.getItem("viewMode"); if (m === "tree" || m === "endpoints") setViewMode(m); } catch { /* storage unavailable */ }
 
 
 $("btn-har").addEventListener("click", () => {
@@ -1775,6 +1785,12 @@ function goToRow(id) {
  * Parents are the same as in the tree view; in the list view a parent that the
  * filters hide is skipped for the nearest one shown. */
 function levelJump(id, dir) {
+  if (state.viewMode === "endpoints") {
+    const node = treeInfo && treeInfo.get(id);
+    if (dir < 0) return node && node.anc[0] < 0 ? node.anc[0] : null;
+    for (let i = viewPos.get(id) + 1; i < view.length; i++) if (view[i] < 0) return view[i];
+    return null;
+  }
   const parent = treeParents();
   if (dir < 0) {
     for (let p = parent.get(id); p != null; p = parent.get(p)) if (viewPos.has(p)) return p;
@@ -1810,7 +1826,7 @@ function revealIndex(i) {
 }
 
 function select(id) {
-  if (!store.has(id)) return;
+  if (!store.has(id) && !isEndpoint(id)) return;
   detailsScroller.stop(); // a scroll animation belongs to the request it started on
   state.selectedId = id;
   state.cursorId = id;
@@ -1834,6 +1850,7 @@ function closeDetails() {
   revokeBlobs();
   detailsCursor = null;
   clearFindHighlights();
+  detailsPane.classList.remove("endpoint-details");
   detailsBody.replaceChildren();
 }
 
@@ -1967,11 +1984,14 @@ document.addEventListener("keydown", (ev) => {
       return;
     }
   }
-  if ((ev.key === "ArrowLeft" || ev.key === "ArrowRight") && state.viewMode === "tree" && cursor != null) {
+  if ((ev.key === "ArrowLeft" || ev.key === "ArrowRight") && state.viewMode !== "list" && cursor != null) {
     const node = treeInfo && treeInfo.get(cursor);
-    if (node && node.kids && collapsed.has(cursor) === (ev.key === "ArrowRight")) {
+    if (node && node.kids && (cursor < 0 ? epCollapsed(cursor) : collapsed.has(cursor)) === (ev.key === "ArrowRight")) {
       ev.preventDefault();
       toggleCollapsed(cursor, false);
+    } else if (ev.key === "ArrowLeft" && state.viewMode === "endpoints" && node && node.anc[0] < 0) {
+      ev.preventDefault();
+      goToRow(node.anc[0]); // from a call to its endpoint
     }
     return;
   }
@@ -2116,6 +2136,7 @@ $("details-tabs").addEventListener("click", (ev) => {
 
 async function loadDetails(id, keepScroll) {
   const token = ++detailsToken;
+  if (id < 0) { current = null; if (isEndpoint(id)) renderEndpoint(epRows.get(id)); return; } // an endpoint (Endpoints view)
   const d = await browser.runtime.sendMessage({ cmd: "getDetails", id });
   if (token !== detailsToken || state.selectedId !== id) return;
   current = d;
@@ -2140,6 +2161,8 @@ function revokeBlobs() {
 }
 
 function renderDetails(keepScroll) {
+  if (state.selectedId != null && state.selectedId < 0) { if (isEndpoint(state.selectedId)) renderEndpoint(epRows.get(state.selectedId)); return; }
+  detailsPane.classList.remove("endpoint-details");
   const scroll = detailsBody.scrollTop;
   if (!keepScroll && current) searchDetailsTab(current);
   // Where the highlighted row sits, so the same row of the next request can

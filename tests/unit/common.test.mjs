@@ -76,3 +76,32 @@ test("cookie parsing", () => {
   const set = NM.parseSetCookies(["sid=abc; Path=/; HttpOnly", "x=1"]);
   assert.deepEqual(plain(set.map((c) => [c.name, c.value, c.attrs.length])), [["sid", "abc", 2], ["x", "1", 0]]);
 });
+
+test("pathPattern turns IDs into placeholders and leaves words alone", () => {
+  const cases = {
+    "/users/123": "/users/{id}",
+    "/users/123/posts/9.json": "/users/{id}/posts/{id}.json",
+    "/items/0f8b6c1e-2a3d-4b5c-9d8e-7f6a5b4c3d2e": "/items/{uuid}",
+    "/day/2026-11-07": "/day/{date}",
+    "/files/9f8e7d6c5b4a3f2e1d0c": "/files/{hash}",
+    "/s/aB3dE5fG7hJ9kL1mN3pQ": "/s/{token}",
+    "/blog/my-long-article-title-2024": "/blog/my-long-article-title-2024",
+    "/api/v2/search": "/api/v2/search",
+    "/static/app.min.js": "/static/app.min.js",
+    "/": "/",
+  };
+  for (const [path, want] of Object.entries(cases)) assert.equal(NM.pathPattern(path), want, path);
+});
+
+test("jsonShape merges documents into fields with types and presence", () => {
+  const shape = new Map();
+  NM.jsonShape(shape, { id: 1, name: "a", tags: ["x"], address: { city: "D" } }, 0);
+  NM.jsonShape(shape, { id: 2, name: null, tags: [], extra: true }, 1);
+  const f = (p) => { const x = shape.get(p); return x && [[...x.types].sort().join("|"), x.docs, x.example]; };
+  assert.deepEqual(f("id"), ["number", 2, 1]);
+  assert.deepEqual(f("name"), ["null|string", 2, "a"]);
+  assert.deepEqual(f("tags[]"), ["string", 1, "x"]);
+  assert.deepEqual(f("address.city"), ["string", 1, "D"]);
+  assert.deepEqual(f("extra"), ["boolean", 1, true]);
+  assert.equal(shape.get("").docs, 2);
+});

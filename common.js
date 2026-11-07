@@ -308,4 +308,46 @@ const NM = {
     const n = /^(co|com|net|org|gov|ac|edu|ne|or|go)$/.test(labels[labels.length - 2] || "") && labels[labels.length - 1].length === 2 ? 3 : 2;
     return labels.slice(-n).join(".");
   },
+
+  /* Endpoints: a URL path with the parts that are clearly IDs replaced, so
+   * /users/123 and /users/456 are one endpoint, /users/{id}. Numbers {id},
+   * UUIDs {uuid}, dates {date}, long hex strings {hash}, and long mixes of
+   * letters and digits {token} (not word slugs). A file extension stays. */
+  pathPattern(pathname) {
+    return String(pathname || "/").split("/").map((seg) => {
+      if (!seg) return seg;
+      let s = seg;
+      try { s = decodeURIComponent(seg); } catch { /* keep as is */ }
+      const m = /^(.*\d.*?)(\.[a-z][a-z0-9]{0,4})$/i.exec(s); // 123.json -> {id}.json
+      const base = m ? m[1] : s, ext = m ? m[2] : "";
+      if (/^\d+$/.test(base)) return "{id}" + ext;
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(base)) return "{uuid}" + ext;
+      if (/^\d{4}-\d{2}-\d{2}([T_ ][\d:.]+Z?)?$/.test(base)) return "{date}" + ext;
+      if (/^[0-9a-f]{12,}$/i.test(base) && /\d/.test(base)) return "{hash}" + ext;
+      if (base.length >= 16 && /^[A-Za-z0-9_\-=+.~]+$/.test(base) && /\d/.test(base) && /[A-Za-z]/.test(base) &&
+          !/[A-Za-z]{3,}[-_][A-Za-z]{3,}/.test(base)) return "{token}" + ext;
+      return seg;
+    }).join("/");
+  },
+
+  /* Adds one JSON document's fields to shape (a Map: path -> { types: Set,
+   * docs, example }), counting each path once per document. Paths are like
+   * user.address.city and items[].id; the top level is "". Deep or huge
+   * values are only partly walked. */
+  jsonShape(shape, value, doc, path = "", depth = 0) {
+    const type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+    let f = shape.get(path);
+    if (!f) { if (shape.size >= 2000) return; shape.set(path, f = { types: new Set(), docs: 0, lastDoc: -1, example: undefined }); }
+    f.types.add(type);
+    if (f.lastDoc !== doc) { f.lastDoc = doc; f.docs++; }
+    if (f.example === undefined && type !== "object" && type !== "array") f.example = value;
+    if (depth >= 8) return;
+    if (type === "object") {
+      for (const [k, v] of Object.entries(value).slice(0, 300)) {
+        NM.jsonShape(shape, v, doc, path ? (/^[A-Za-z_$][\w$]*$/.test(k) ? `${path}.${k}` : `${path}[${JSON.stringify(k)}]`) : (/^[A-Za-z_$][\w$]*$/.test(k) ? k : `[${JSON.stringify(k)}]`), depth + 1);
+      }
+    } else if (type === "array") {
+      for (const v of value.slice(0, 50)) NM.jsonShape(shape, v, doc, `${path}[]`, depth + 1);
+    }
+  },
 };

@@ -23,6 +23,7 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 - DevTools-compatible filter language (`-mime-type:`, `transferred-larger-than:`, `is:blocked`, `size-larger-than:` …) in a rules editor (/)
 - Shows which extension blocked a request (e.g. "Blocked by uBlock Origin")
 - Initiator tree view (which script/stylesheet loaded what)
+- Endpoints view: requests grouped by API endpoint (`/users/123` and `/users/456` are `GET /users/{id}`; GraphQL by operation), with call counts, statuses and average times. An endpoint's details show the values its path parameters took, its query parameters (and which are optional), the request body fields, the response shape merged over all calls (optional fields marked), and the request headers that change between calls
 - Offline preview of HTML (using already-recorded resources), images, SVGs and fonts
 - URL blocking
 
