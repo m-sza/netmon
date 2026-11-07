@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Always-On Network Monitor",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Records network traffic in the background, all the time, and shows it in a DevTools-style network panel.",
   "minimum_chrome_version": "125",
   "permissions": [
