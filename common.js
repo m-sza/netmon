@@ -211,6 +211,7 @@ const NM = {
         if (c === "(") paren++;
         else if (c === ")") paren--;
         if (c === ":" || c === ",") { line = line.trimEnd() + c + " "; while (/[ \t\r\n]/.test(q[i + 1] || "")) i++; }
+        else if (c === "=") { line = line.trimEnd() + " = "; while (/[ \t\r\n]/.test(q[i + 1] || "")) i++; }
         else line += /\s/.test(c) ? (line.endsWith(" ") || line.endsWith("(") ? "" : " ") : c;
       } else if (c === "(") { paren = 1; line += c; }
       else if (c === "{") { line = line.trimEnd() + " {"; nl(); depth++; }
@@ -227,5 +228,84 @@ const NM = {
     }
     nl();
     return out.trimEnd();
+  },
+
+  /* Re-lays out valid JSON text: pretty (2-space indent) or minified. Works on
+   * the text, not on parsed values, so numbers and string escapes stay exactly
+   * as sent (JSON.parse would round big numbers). */
+  reformatJson(text, pretty) {
+    const out = [];
+    let depth = 0;
+    const nl = () => "\n" + "  ".repeat(depth);
+    const n = text.length;
+    for (let i = 0; i < n;) {
+      const c = text[i];
+      if (c === '"') {
+        let j = i + 1;
+        while (j < n && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+        out.push(text.slice(i, j + 1));
+        i = j + 1;
+      } else if (c === " " || c === "\n" || c === "\r" || c === "\t") {
+        i++;
+      } else if (!pretty || !"{}[],:".includes(c)) {
+        let j = i + 1; // a run of other characters (numbers, literals; punctuation when minifying)
+        while (j < n && !" \n\r\t\"".includes(text[j]) && (!pretty || !"{}[],:".includes(text[j]))) j++;
+        out.push(text.slice(i, j));
+        i = j;
+      } else if (c === "{" || c === "[") {
+        let j = i + 1;
+        while (j < n && " \n\r\t".includes(text[j])) j++;
+        if (text[j] === (c === "{" ? "}" : "]")) { out.push(c + text[j]); i = j + 1; continue; } // {} and [] stay on one line
+        depth++;
+        out.push(c + nl());
+        i++;
+      } else {
+        if (c === "}" || c === "]") { depth--; out.push(nl() + c); }
+        else out.push(c === "," ? "," + nl() : ": ");
+        i++;
+      }
+    }
+    return out.join("");
+  },
+
+  // The offset of a 1-based line and column in text, or null past the end.
+  offsetAt(text, line, col) {
+    let i = 0;
+    for (let n = 1; n < line; n++) {
+      i = text.indexOf("\n", i);
+      if (i < 0) return null;
+      i++;
+    }
+    const end = text.indexOf("\n", i);
+    return Math.min(i + Math.max(0, col - 1), end < 0 ? text.length : end);
+  },
+
+  // Where offset `at` of the original text is in its formatted version: the
+  // formatter only changes whitespace, so the same number of other characters
+  // comes before it. Returns a 0-based line and column of the formatted text.
+  mapOffset(orig, formatted, at) {
+    const isWs = (c) => c === 32 || c === 10 || c === 13 || c === 9;
+    let k = 0;
+    for (let i = 0; i < at; i++) if (!isWs(orig.charCodeAt(i))) k++;
+    let j = 0;
+    for (let seen = 0; j < formatted.length; j++) {
+      if (isWs(formatted.charCodeAt(j))) continue;
+      if (seen === k) break;
+      seen++;
+    }
+    const lineStart = formatted.lastIndexOf("\n", j - 1) + 1;
+    let line = 0;
+    for (let i = formatted.indexOf("\n"); i >= 0 && i < j; i = formatted.indexOf("\n", i + 1)) line++;
+    return { line, col: j - lineStart };
+  },
+
+  // The site a URL belongs to, for cookies: its last two host labels (three for
+  // hosts like example.co.uk). Close enough to the browser's cookie scoping here.
+  siteOf(url) {
+    const host = (NM.safeUrl(url) || {}).hostname || "";
+    if (/^[\d.]+$|^\[|^localhost$/.test(host)) return host;
+    const labels = host.split(".");
+    const n = /^(co|com|net|org|gov|ac|edu|ne|or|go)$/.test(labels[labels.length - 2] || "") && labels[labels.length - 1].length === 2 ? 3 : 2;
+    return labels.slice(-n).join(".");
   },
 };

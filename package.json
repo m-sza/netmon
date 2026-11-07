@@ -1,0 +1,13 @@
+{
+  "name": "netmon",
+  "private": true,
+  "description": "Tooling for netmon's tests (the extension itself has no dependencies). Run ./test.sh.",
+  "type": "module",
+  "scripts": {
+    "test": "./test.sh"
+  },
+  "devDependencies": {
+    "puppeteer-core": "25.16.0",
+    "ws": "8.22.1"
+  }
+}

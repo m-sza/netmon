@@ -1372,9 +1372,9 @@ function searchEntries(ids, text, scope) {
 function cookieOrigins(id) {
   const e = entries.get(id);
   if (!e) return null;
-  const site = siteOf(e.url);
+  const site = NM.siteOf(e.url);
   const earlier = [];
-  for (const x of entries.values()) if (x !== e && x.start <= e.start && siteOf(x.url) === site) earlier.push(x);
+  for (const x of entries.values()) if (x !== e && x.start <= e.start && NM.siteOf(x.url) === site) earlier.push(x);
   earlier.reverse(); // newest first
   const parsed = new Map();
   const setBy = (x) => {
@@ -1392,15 +1392,6 @@ function cookieOrigins(id) {
     sent: NM.parseCookieHeader(NM.header(e.requestHeaders, "cookie")).map((c) => lastSet(c.name, c.value)),
     set: NM.parseSetCookies(NM.headerAll(e.responseHeaders, "set-cookie")).map((c) => lastSet(c.name, c.value)),
   };
-}
-// The site a URL belongs to, for cookies: its last two host labels (three for
-// hosts like example.co.uk). Close enough to the browser's cookie scoping here.
-function siteOf(url) {
-  const host = (NM.safeUrl(url) || {}).hostname || "";
-  if (/^[\d.]+$|^\[|^localhost$/.test(host)) return host;
-  const labels = host.split(".");
-  const n = /^(co|com|net|org|gov|ac|edu|ne|or|go)$/.test(labels[labels.length - 2] || "") && labels[labels.length - 1].length === 2 ? 3 : 2;
-  return labels.slice(-n).join(".");
 }
 
 // GraphQL operations of a request (type and name only), worked out once.

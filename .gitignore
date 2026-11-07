@@ -2,3 +2,7 @@
 *.xpi
 *.zip
 dist/
+
+# Test tooling
+node_modules/
+tests/.cache/

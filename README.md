@@ -73,6 +73,20 @@ Produces:
 
 `./build.sh --install` also hands the new `.xpi` to your running Firefox, which updates the installed add-on in place (set `FIREFOX=/path/to/firefox` if it picks the wrong one).
 
+## Tests
+
+```sh
+npm install      # once: the test tools (puppeteer-core, ws)
+./test.sh        # unit tests, then every feature in real Firefox and Chrome (a few minutes)
+./test.sh unit   # unit tests only (a second)
+./test.sh firefox                         # or chrome: one browser
+./test.sh tests/browser/search.test.mjs   # one file
+```
+
+The browser tests start a local test site (`tests/helpers/site.mjs`), install the freshly built extension and drive the panel. They need Firefox Developer Edition or Nightly (for the unsigned add-on; set `FIREFOX` to its binary) and Chrome (`CHROME`). `./release.sh` runs them before publishing.
+
+What they can't check: keys the browser itself takes before the page (the test tools send keys straight to the page) and how things look.
+
 ## Install
 
 Download the latest build from [Releases](https://github.com/m-sza/netmon/releases), or build it yourself (above).

@@ -1,6 +1,6 @@
 "use strict";
 
-const { header, headerAll, parseContentType, isTextMime, decodeText, safeUrl, parseCookieHeader, parseSetCookies } = NM;
+const { header, headerAll, parseContentType, isTextMime, decodeText, safeUrl, parseCookieHeader, parseSetCookies, reformatJson, offsetAt, mapOffset } = NM;
 
 /* ---------------------------------------------------------------------------
  * DOM
@@ -2803,35 +2803,6 @@ function bodyView(buf, mime, charset, url, ctx) {
 const fmtCtl = new WeakMap(); // .fmt-seg element -> cycles the format
 const bodyCtl = new WeakMap(); // .body-view -> { reveal(line, col) }
 
-// The offset of a 1-based line and column in text, or null past the end.
-function offsetAt(text, line, col) {
-  let i = 0;
-  for (let n = 1; n < line; n++) {
-    i = text.indexOf("\n", i);
-    if (i < 0) return null;
-    i++;
-  }
-  const end = text.indexOf("\n", i);
-  return Math.min(i + Math.max(0, col - 1), end < 0 ? text.length : end);
-}
-// Where offset `at` of the original text is in its formatted version: the
-// formatter only changes whitespace, so the same number of other characters
-// comes before it. Returns a 0-based line and column of the formatted text.
-function mapOffset(orig, formatted, at) {
-  const isWs = (c) => c === 32 || c === 10 || c === 13 || c === 9;
-  let k = 0;
-  for (let i = 0; i < at; i++) if (!isWs(orig.charCodeAt(i))) k++;
-  let j = 0;
-  for (let seen = 0; j < formatted.length; j++) {
-    if (isWs(formatted.charCodeAt(j))) continue;
-    if (seen === k) break;
-    seen++;
-  }
-  const lineStart = formatted.lastIndexOf("\n", j - 1) + 1;
-  let line = 0;
-  for (let i = formatted.indexOf("\n"); i >= 0 && i < j; i = formatted.indexOf("\n", i + 1)) line++;
-  return { line, col: j - lineStart };
-}
 // Marks the token starting at character `at` of root's text (lineText is that
 // text) and scrolls to it.
 function markSourceToken(root, lineText, at) {
@@ -2910,43 +2881,6 @@ function codeMenu(ev, code) {
   ], ev.target);
 }
 
-/* Re-lays out valid JSON text: pretty (2-space indent) or minified. Works on
- * the text, not on parsed values, so numbers and string escapes stay exactly
- * as sent (JSON.parse would round big numbers). */
-function reformatJson(text, pretty) {
-  const out = [];
-  let depth = 0;
-  const nl = () => "\n" + "  ".repeat(depth);
-  const n = text.length;
-  for (let i = 0; i < n;) {
-    const c = text[i];
-    if (c === '"') {
-      let j = i + 1;
-      while (j < n && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
-      out.push(text.slice(i, j + 1));
-      i = j + 1;
-    } else if (c === " " || c === "\n" || c === "\r" || c === "\t") {
-      i++;
-    } else if (!pretty || !"{}[],:".includes(c)) {
-      let j = i + 1; // a run of other characters (numbers, literals; punctuation when minifying)
-      while (j < n && !" \n\r\t\"".includes(text[j]) && (!pretty || !"{}[],:".includes(text[j]))) j++;
-      out.push(text.slice(i, j));
-      i = j;
-    } else if (c === "{" || c === "[") {
-      let j = i + 1;
-      while (j < n && " \n\r\t".includes(text[j])) j++;
-      if (text[j] === (c === "{" ? "}" : "]")) { out.push(c + text[j]); i = j + 1; continue; } // {} and [] stay on one line
-      depth++;
-      out.push(c + nl());
-      i++;
-    } else {
-      if (c === "}" || c === "]") { depth--; out.push(nl() + c); }
-      else out.push(c === "," ? "," + nl() : ": ");
-      i++;
-    }
-  }
-  return out.join("");
-}
 
 // Right-click in a JSON tree: copy the key, the value or section, the object
 // it sits in, or its path.

@@ -2,9 +2,10 @@
 # Publishes a GitHub release of the current commit with both packages:
 #   ./release.sh notes.md
 # The version comes from the manifests (bump them, commit, then run this).
-# Checks first: both manifests agree, the tree is clean and pushed, and the
-# tag doesn't exist yet. Builds from the committed files, tags vX.Y.Z, and
-# uploads netmon-X.Y.Z-firefox.xpi and netmon-X.Y.Z-chrome.zip.
+# Checks first: both manifests agree, the tree is clean and pushed, the tag
+# doesn't exist yet, and the tests pass (./test.sh; SKIP_TESTS=1 skips them).
+# Builds from the committed files, tags vX.Y.Z, and uploads
+# netmon-X.Y.Z-firefox.xpi and netmon-X.Y.Z-chrome.zip.
 set -e
 cd "$(dirname "$0")"
 
@@ -21,6 +22,10 @@ git fetch -q origin
 [ "$(git rev-parse HEAD)" = "$(git rev-parse '@{u}')" ] || { echo "HEAD isn't pushed (or is behind origin); push/pull first." >&2; exit 1; }
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
   echo "Tag $tag already exists; bump the version in both manifests." >&2; exit 1
+fi
+
+if [ -z "$SKIP_TESTS" ]; then
+  ./test.sh || { echo "Tests failed; not releasing." >&2; exit 1; }
 fi
 
 ./build.sh
