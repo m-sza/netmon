@@ -9,6 +9,7 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 - Records every tab continuously; view one tab, the current tab or all tabs, with tabs grouped by window and closed tabs kept under their last title
 - Overview timeline above the list (like Chrome's): bars colored by request type, DOMContentLoaded/Load markers, drag to filter by time range
 - Request/response headers, bodies (collapsible JSON tree with right-click copy of key, value or path, syntax highlighting), cookies, timings
+- JavaScript, CSS and HTML bodies formatted (even when minified) into a collapsible code view, like the JSON tree; Raw shows them as sent. Formatting uses [js-beautify](https://github.com/beautifier/js-beautify) (MIT)
 - TLS / security details per request
 - WebSocket traffic, including sending and editing-and-resending messages; HAR export includes WebSocket frames
 - Resend / edit and resend requests
@@ -32,6 +33,7 @@ A browser extension for Firefox and Chrome that records network traffic in the b
 | Shift+↑ ↓, Shift+Page Up/Down | Scroll the details |
 | R | Raw on / off (headers, JSON, HTML) |
 | M | Raw JSON pretty-printed / minified (starts as sent) |
+| V | HTML: page preview / formatted code |
 | F, N / Shift+N | Find in the body, next / previous match |
 | Ctrl+Shift+↑ ↓ / Home / End (←/→ for JSON) | Highlight a row in the details (collapse / expand); it stays on that row as you move between requests |
 | Ctrl+C, C, K, P / Shift+P | Copy the highlighted row, its value, its key, its JSON path (JavaScript / Python) |

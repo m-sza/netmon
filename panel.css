@@ -878,3 +878,7 @@ table.kv tr.dcursor td:last-child { box-shadow: inset 0 1px var(--accent), inset
 .search-trace .note { padding: 0; }
 #btn-search.active { color: var(--accent); background: var(--hover); }
 ::highlight(nm-search) { background-color: var(--find-bg); color: inherit; }
+
+/* Code view (JS, CSS, HTML): the JSON tree's look; empty lines keep their height. */
+.codetree .jt-line { min-height: 1.45em; }
+.code-box[hidden] { display: none; }

@@ -38,7 +38,8 @@ const state = {
   cursorId: null,          // the row the keyboard is on; Enter/Space opens it
   detailsTab: "headers",
   rawHeaders: false,
-  rawBody: false,          // bodies as source text, not as a JSON tree or page preview
+  rawBody: false,          // bodies as source text, not as a JSON tree, code view or page preview
+  htmlView: "preview",     // HTML bodies (when not raw): "preview" or "code"
   recording: true,
   captureBodies: true,
   blocked: new Set(),
@@ -1844,6 +1845,13 @@ document.addEventListener("keydown", (ev) => {
       const what = plain && (letter === "c" && !ev.shiftKey ? "value" : letter === "k" && !ev.shiftKey ? "key" : letter === "p" ? (ev.shiftKey ? "pypath" : "path") : null);
       if (what) { ev.preventDefault(); copyFromDetailsCursor(what); return; }
     }
+    if (plain && !ev.shiftKey && letter === "v") {
+      ev.preventDefault();
+      const seg = [...detailsBody.querySelectorAll(".fmt-seg")].find((x) => viewCtl.has(x));
+      if (seg) viewCtl.get(seg)();
+      else toast("Preview / Code is for HTML bodies");
+      return;
+    }
     if (plain && !ev.shiftKey && letter === "m") {
       ev.preventDefault();
       const seg = detailsBody.querySelector(".fmt-seg");
@@ -2467,11 +2475,44 @@ function bodyView(buf, mime, charset, url, ctx) {
   const pre = h("pre", { class: "code" });
   const limitNote = note(`Showing the first ${TEXT_LIMIT.toLocaleString()} characters.`);
   const plainNote = note("Syntax highlighting is off for bodies this large.");
-  const finder = createFinder(pre, tree, () => (preview && !state.rawBody ? "preview" : tree && !state.rawBody ? "tree" : "text"),
-    () => { state.rawBody = true; rawBox.checked = true; show(); });
-  const treeBtns = tree && h("span", { class: "tree-btns" },
-    h("button", { class: "text-btn", onclick: () => tree.expandAll() }, "Expand all"),
-    h("button", { class: "text-btn", onclick: () => tree.collapseAll() }, "Collapse all"));
+  // JS, CSS and HTML: formatted, collapsible code (formatted in a worker the first time it shows).
+  const codeLang = (lang === "js" || lang === "css" || lang === "html") && text.length <= TEXT_LIMIT;
+  const codeBox = codeLang ? h("div", { class: "code-box" }) : null;
+  let code = null;
+  let codeStarted = false;
+  const ensureCode = () => {
+    if (codeStarted) return;
+    codeStarted = true;
+    codeBox.replaceChildren(note(`Formatting the ${Syntax.label(lang)}…`));
+    formatCode(text, lang).then((res) => {
+      if (!wrap.isConnected) { codeStarted = false; return; }
+      code = CodeTree.render(res.text, lang);
+      code.el.addEventListener("contextmenu", (ev) => codeMenu(ev, code));
+      jsonTrees.set(code.el, code);
+      codeBox.replaceChildren(...(res.error ? [note(`Couldn't format it (${res.error}), so it's shown as sent.`, "warn")] : []), code.el);
+      show();
+      if (view() === "code") paintSearch(true);
+    });
+  };
+  // What shows: "raw" (the text as sent), "tree" (JSON), "code" or "preview" (HTML).
+  const view = () => (state.rawBody ? "raw" : tree ? "tree" : preview && state.htmlView === "preview" ? "preview" : codeLang ? "code" : preview ? "preview" : "raw");
+  const viewer = () => (view() === "tree" ? tree : code);
+  const finder = createFinder(pre, viewer,
+    () => { const v = view(); return v === "code" ? (code ? "tree" : "pending") : v === "raw" ? "text" : v; },
+    () => { if (codeLang) { state.htmlView = "code"; show(); } else { state.rawBody = true; rawBox.checked = true; show(); } });
+  const treeBtns = (tree || codeLang) && h("span", { class: "tree-btns" },
+    h("button", { class: "text-btn", onclick: () => viewer()?.expandAll() }, "Expand all"),
+    h("button", { class: "text-btn", onclick: () => viewer()?.collapseAll() }, "Collapse all"));
+  // HTML: the page (preview) or its code. The V key switches.
+  const htmlSeg = preview && codeLang && h("span", { class: "seg fmt-seg", title: "Show the page, or its formatted, collapsible code. Key: V" },
+    ...[["preview", "Preview"], ["code", "Code"]].map(([v, label]) =>
+      h("button", { "data-view": v, onclick: () => { state.htmlView = v; show(); } }, label)));
+  if (htmlSeg) viewCtl.set(htmlSeg, () => {
+    if (state.rawBody) { state.rawBody = false; rawBox.checked = false; }
+    else state.htmlView = state.htmlView === "code" ? "preview" : "code";
+    show();
+    toast(state.htmlView === "code" ? "HTML code" : "Page preview");
+  });
   // Raw JSON pretty-printed or minified (the M key switches). It starts the
   // way it was sent: JSON with line breaks counts as pretty (a raw line break
   // can only be whitespace, never inside a string), and that one shows the
@@ -2491,12 +2532,17 @@ function bodyView(buf, mime, charset, url, ctx) {
   });
   let highlighted = null; // the format the source view shows
   const show = () => {
-    const usePreview = preview && !state.rawBody;
-    if (preview) preview.hidden = !usePreview;
-    const useTree = tree && !state.rawBody;
-    if (tree) { tree.el.hidden = !useTree; treeBtns.hidden = !useTree; fmtSeg.hidden = useTree; }
-    pre.hidden = useTree || usePreview;
-    if (useTree || usePreview) { limitNote.hidden = plainNote.hidden = true; finder.refresh(); return; }
+    const v = view();
+    if (preview) preview.hidden = v !== "preview";
+    if (tree) { tree.el.hidden = v !== "tree"; fmtSeg.hidden = v === "tree"; }
+    if (codeBox) { codeBox.hidden = v !== "code"; if (v === "code") ensureCode(); }
+    if (treeBtns) treeBtns.hidden = v !== "tree" && v !== "code";
+    if (htmlSeg) {
+      htmlSeg.hidden = v === "raw";
+      for (const b of htmlSeg.children) b.classList.toggle("active", b.dataset.view === v);
+    }
+    pre.hidden = v !== "raw";
+    if (v !== "raw") { limitNote.hidden = plainNote.hidden = true; finder.refresh(); return; }
     if (fmtSeg) for (const b of fmtSeg.children) b.classList.toggle("active", b.dataset.fmt === fmt);
     const body = textFor(fmt);
     const shown = body.length > TEXT_LIMIT ? body.slice(0, TEXT_LIMIT) : body;
@@ -2506,26 +2552,76 @@ function bodyView(buf, mime, charset, url, ctx) {
     finder.refresh();
   };
   // One "Raw" switch for every body that has another view (the JSON tree, the
-  // page preview): the R key flips it, like the one on the Headers tab.
-  const rawBox = (tree || preview) && h("input", { type: "checkbox", "data-raw": "", checked: state.rawBody, onchange: (e) => { state.rawBody = e.target.checked; show(); } });
+  // code view, the page preview): the R key flips it, like the one on the Headers tab.
+  const rawBox = (tree || preview || codeLang) && h("input", { type: "checkbox", "data-raw": "", checked: state.rawBody, onchange: (e) => { state.rawBody = e.target.checked; show(); } });
   show();
 
   const actions = h("div", { class: "actions" },
-    h("button", { class: "text-btn", title: "Copy the body (raw JSON in the format shown)", onclick: (e) => copyText(tree && state.rawBody ? textFor(fmt) : text, e.currentTarget) }, "Copy"),
+    h("button", { class: "text-btn", title: "Copy the body as shown (formatted in the code view, raw JSON in the format shown)",
+      onclick: (e) => copyText(view() === "code" && code ? code.text : tree && state.rawBody ? textFor(fmt) : text, e.currentTarget) }, "Copy"),
     treeBtns,
+    htmlSeg,
     rawBox
-      ? h("label", { class: "check", title: preview ? "Show the HTML source instead of the page (the preview runs no scripts). Key: R" : "Show the JSON as sent instead of the tree. Key: R" },
+      ? h("label", { class: "check", title: tree ? "Show the JSON as sent instead of the tree. Key: R" : "Show the source exactly as sent. Key: R" },
           rawBox, "Raw")
       : null,
     fmtSeg,
     finder.el,
     h("span", { class: "note" }, `${Syntax.label(lang)} · ${fmtBytes(size)}`));
 
-  wrap.append(actions, limitNote, plainNote, ...(tree ? [tree.el] : []), ...(preview ? [preview] : []), pre);
+  wrap.append(actions, limitNote, plainNote, ...(tree ? [tree.el] : []), ...(codeBox ? [codeBox] : []), ...(preview ? [preview] : []), pre);
   return wrap;
 }
 
 const fmtCtl = new WeakMap(); // .fmt-seg element -> cycles the format
+const viewCtl = new WeakMap(); // HTML Preview | Code switch -> flips it
+
+/* Formatting for the code view, in a worker (format-worker.js). Results are
+ * kept for the last few bodies, so going back and forth is instant. */
+const formatCache = new Map(); // key -> Promise<{ text, error? }>
+const formatWaiting = new Map(); // message id -> resolve
+let formatWorker = null;
+let formatSeq = 0;
+function hashText(t) { // FNV-1a
+  let x = 0x811c9dc5;
+  for (let i = 0; i < t.length; i++) x = Math.imul(x ^ t.charCodeAt(i), 0x01000193);
+  return (x >>> 0).toString(36);
+}
+function formatCode(text, lang) {
+  const key = `${lang}:${text.length}:${hashText(text)}`;
+  const hit = formatCache.get(key);
+  if (hit) { formatCache.delete(key); formatCache.set(key, hit); return hit; }
+  const p = new Promise((resolve) => {
+    try {
+      if (!formatWorker) {
+        formatWorker = new Worker("format-worker.js");
+        formatWorker.onmessage = (ev) => { const done = formatWaiting.get(ev.data.id); formatWaiting.delete(ev.data.id); if (done) done(ev.data); };
+        formatWorker.onerror = (ev) => {
+          for (const done of formatWaiting.values()) done({ error: ev.message || "the formatter stopped" });
+          formatWaiting.clear();
+          formatWorker = null;
+        };
+      }
+      const id = ++formatSeq;
+      formatWaiting.set(id, resolve);
+      formatWorker.postMessage({ id, lang, text });
+    } catch (err) { resolve({ error: String(err.message || err) }); }
+  }).then((r) => (r.error ? { text, error: r.error } : { text: r.text }));
+  formatCache.set(key, p);
+  while (formatCache.size > 20) formatCache.delete(formatCache.keys().next().value);
+  return p;
+}
+
+// Right-click in the code view: copy the line, or the whole block it opens.
+function codeMenu(ev, code) {
+  const e = code.entryAt(ev.target);
+  if (!e) return;
+  ev.preventDefault();
+  openMenu(ev.clientX, ev.clientY, [
+    { label: "Copy Line", run: () => copy(e.line(), "Line copied") },
+    { label: "Copy Block", disabled: !e.isSection, run: () => copy(e.value(), "Block copied") },
+  ], ev.target);
+}
 
 /* Re-lays out valid JSON text: pretty (2-space indent) or minified. Works on
  * the text, not on parsed values, so numbers and string escapes stay exactly
@@ -2642,9 +2738,11 @@ function revealInDetails(rect, center) {
   if (to !== now) detailsScroller.to(to, 150);
 }
 
-// mode() says what's shown: "text", "tree" or "preview"; toSource() switches
-// to the source (search can't look into the page preview).
-function createFinder(pre, tree, mode, toSource) {
+// mode() says what's shown: "text", "tree" (getTree() gives the JSON or code
+// viewer), "pending" (the code view isn't formatted yet) or "preview";
+// toSource() switches to something searchable (search can't look into the
+// page preview).
+function createFinder(pre, getTree, mode, toSource) {
   const input = h("input", { type: "text", class: "find-input", placeholder: "Find", spellcheck: false,
     title: "Find in this body (key: F). Enter / Shift+Enter, or N / Shift+N: next / previous match. Esc: clear." });
   const count = h("span", { class: "find-count" });
@@ -2660,8 +2758,8 @@ function createFinder(pre, tree, mode, toSource) {
     if (!matches.length) return;
     let current, all;
     if (mode() === "tree") {
-      const at = (m) => { const ln = tree.lineOf(m, false); return ln && textRanges(ln, re, m.nth + 1, m.len)[m.nth]; };
-      tree.lineOf(matches[cur], true); // opens the sections around it
+      const at = (m) => { const ln = getTree().lineOf(m, false); return ln && textRanges(ln, re, m.nth + 1, m.len)[m.nth]; };
+      getTree().lineOf(matches[cur], true); // opens the sections around it
       current = at(matches[cur]);
       all = matches.map(at).filter(Boolean);
     } else {
@@ -2685,8 +2783,9 @@ function createFinder(pre, tree, mode, toSource) {
     matches = [];
     cur = -1;
     if (re && mode() === "preview") { toSource(); return; } // shows the source, which runs this again
+    if (re && mode() === "pending") { clearFindHighlights(); count.textContent = "…"; return; } // the code view is still being formatted
     if (re) {
-      matches = mode() === "tree" ? tree.find(re, FIND_LIMIT) : textRanges(pre, re, FIND_LIMIT);
+      matches = mode() === "tree" ? getTree().find(re, FIND_LIMIT) : textRanges(pre, re, FIND_LIMIT);
       if (matches.length) cur = 0;
     }
     paint(!given || given.reveal);
@@ -2735,7 +2834,7 @@ function rowIdentity(el) {
   const trees = [...detailsBody.querySelectorAll(".jtree")];
   const treeEl = el.closest(".jtree");
   const e = jsonTrees.get(treeEl).entryAt(el);
-  return e && { tree: trees.indexOf(treeEl), keys: e.keys };
+  return e && e.keys ? { tree: trees.indexOf(treeEl), keys: e.keys } : null; // code lines aren't followed across requests
 }
 function findStickyRow(id) {
   if (id.keys) {
@@ -2800,6 +2899,11 @@ function copyFromDetailsCursor(what) {
   }
   const e = jsonTrees.get(el.closest(".jtree")).entryAt(el);
   if (!e) return;
+  if (e.kind === "code") {
+    if (what === "row" || what === "value") copy(e.value(), e.isSection ? "Block copied" : "Line copied");
+    else toast(what === "key" ? "Lines of code have no key" : "Paths are for lines of a JSON body");
+    return;
+  }
   const What = e.kind === "value" ? "Value" : e.kind === "object" ? "Object" : "Array";
   if (what === "row") copy(e.row(), "Row copied");
   else if (what === "value") copy(e.value(), `${What} copied`);
@@ -2814,7 +2918,8 @@ function traceFromDetailsCursor() {
   const el = detailsCursor;
   if (el.tagName === "TR") { traceValue(kvRows.get(el).value); return; }
   const e = jsonTrees.get(el.closest(".jtree")).entryAt(el);
-  if (!e || e.isSection) toast("Pick a single value to trace, not a whole section");
+  if (e && e.kind === "code") toast("Tracing works on headers, cookies, parameters and JSON values");
+  else if (!e || e.isSection) toast("Pick a single value to trace, not a whole section");
   else traceValue(e.value());
 }
 detailsBody.addEventListener("click", (ev) => {
