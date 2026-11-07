@@ -912,7 +912,6 @@ table.kv td .note.cookie-origin:empty { display: none; }
 #rows .gql-op:empty { display: none; }
 
 /* Endpoints view */
-#rows tr.endpoint .fname { font-family: var(--mono); }
 #details-pane.endpoint-details #details-tabs button[data-tab] { display: none; }
 .ep-title { font-size: 13px; font-weight: 600; margin: 6px 0 4px; word-break: break-all; }
 .ep-title .gql-op { color: var(--tok-fn); font-weight: normal; }
