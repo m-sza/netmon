@@ -88,8 +88,12 @@ for (const kind of BROWSERS) describe(`endpoints view (${kind})`, () => {
     assert.ok(await t.ev(() => !detailsPane.classList.contains("endpoint-details")));
   });
 
-  it("raised no errors in the panel", async () => {
+  it("back in the List view, every row has its type icon (rows are reused)", async () => {
     await t.ev(() => setViewMode("list"));
-    assert.deepEqual(t.errors, []);
+    await t.waitFor(() => { if (viewDirty) rebuildView(); refreshView(); return view.every((id) => id >= 0); });
+    const hidden = await t.ev(() => [...document.querySelectorAll("#rows tr[data-id]")].filter((tr) => !tr.querySelector("svg.ficon").getClientRects().length || tr.classList.contains("ep-folder") || tr.classList.contains("endpoint")).length);
+    assert.equal(hidden, 0);
   });
+
+  it("raised no errors in the panel", () => assert.deepEqual(t.errors, []));
 });

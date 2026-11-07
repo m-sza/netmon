@@ -444,7 +444,7 @@ function buildRow() {
 
 function fillRow(tr, s) {
   if (s.ep) { fillEndpointRow(tr, s); return; }
-  tr.classList.remove("endpoint");
+  tr.classList.remove("endpoint", "ep-folder"); // rows are reused: drop what an endpoint or folder row set
   const [cStatus, cMethod, cDomain, cFile, cInit, cType, cTrans, cSize, cTime] = tr.children;
   const u = safeUrl(s.url);
 
