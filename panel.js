@@ -1872,10 +1872,10 @@ document.addEventListener("keydown", async (ev) => {
 document.addEventListener("keydown", (ev) => {
   // Text boxes keep their keys; a focused checkbox (after a click on it) doesn't.
   if (ev.target.matches("input:not([type=checkbox]):not([type=radio]), select, textarea") || document.querySelector("dialog[open]")) return;
-  // Escape: leaves tracing (back to the request traced from), else drops the
-  // highlighted details row, else closes the details.
+  // Escape: closes the search, or leaves tracing (back to the request traced
+  // from), else drops the highlighted details row, else closes the details.
   if (ev.key === "Escape") {
-    if (search && search.trace) closeSearch();
+    if (!searchBar.hidden) closeSearch();
     else if (hasDetailsCursor()) setDetailsCursor(null);
     else closeDetails();
     return;
